@@ -91,7 +91,7 @@
     text-align: center;
   }
 
-  #mapAerienne, #mapCadastre { cursor: crosshair; }
+  #mapCadastre { cursor: crosshair; }
 
   .algo-panel {
     background: var(--surface); border: 1px solid var(--border);
@@ -147,14 +147,13 @@
   <div class="map-card">
     <div class="map-label">Vue AÉRIENNE</div>
     <div class="map-container" id="mapAerienne"></div>
-    <div class="click-hint">Cliquez pour repositionner la parcelle</div>
     <button class="capture-btn" onclick="capture('aerienne')">Capturer</button>
   </div>
   <div class="map-card">
     <div class="map-label">Plan CADASTRAL</div>
     <div class="map-container" id="mapCadastre"></div>
     <div class="cadastre-ref" id="cadastreRef"></div>
-    <div class="click-hint">Cliquez pour repositionner la parcelle</div>
+    <div class="click-hint">Cliquez sur la parcelle pour la sélectionner</div>
     <button class="capture-btn" onclick="capture('cadastre')">Capturer</button>
   </div>
 </div>
@@ -179,6 +178,19 @@ let currentPolygonsC = [];
 
 // ===== PIN ICON =====
 const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
+
+// ===== IGN PLAN OVERLAY =====
+function createIGNPlanOverlay() {
+  return new google.maps.ImageMapType({
+    getTileUrl: function(coord, zoom) {
+      return `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX=${zoom}&TILEROW=${coord.y}&TILECOL=${coord.x}`;
+    },
+    tileSize: new google.maps.Size(256, 256),
+    name: 'IGN Plan',
+    opacity: 1.0,
+    maxZoom: 19,
+  });
+}
 
 // ===== IGN CADASTRE TILE OVERLAY =====
 function createCadastreOverlay() {
@@ -212,18 +224,22 @@ function initMaps() {
     ...mapOpts, mapTypeId: 'roadmap'
   });
   mapA = new google.maps.Map(document.getElementById('mapAerienne'), {
-    ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0, disableDoubleClickZoom: true
+    ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
   });
   mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
-    ...mapOpts, mapTypeId: 'roadmap', disableDoubleClickZoom: true
+    ...mapOpts, mapTypeId: 'roadmap', disableDoubleClickZoom: true,
+    styles: [
+      // Simplify base map for cadastre: remove POI, transit
+      { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+      { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+    ]
   });
-  // Add cadastre tiles overlay
+  // Add IGN Plan as base layer
+  mapC.overlayMapTypes.push(createIGNPlanOverlay());
+  // Add cadastre tiles on top
   mapC.overlayMapTypes.push(createCadastreOverlay());
 
-  // Click-to-reposition on Aérienne and Cadastre
-  mapA.addListener('click', (e) => {
-    repositionParcelle(e.latLng.lat(), e.latLng.lng());
-  });
+  // Click-to-reposition on Cadastre only
   mapC.addListener('click', (e) => {
     repositionParcelle(e.latLng.lat(), e.latLng.lng());
   });
