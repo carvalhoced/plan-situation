@@ -197,7 +197,6 @@ const API_KEY = 'AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g';
 let mapG, mapP, mapA, mapC;
 let markerG, markerP, markerA;
 let currentPolygonsA = [];
-let currentPolygonsC = [];
 
 // ===== PIN ICON =====
 const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
@@ -400,17 +399,6 @@ function drawParcelleOnMap(map, feature, color = '#521DA5') {
   });
 }
 
-// ===== FETCH SECTION CADASTRALE (feuille) =====
-async function fetchSectionCadastre(codeInsee, section) {
-  const url = `https://apicarto.ign.fr/api/cadastre/feuille?code_insee=${codeInsee}&section=${section}&_limit=1`;
-  console.log('Section URL:', url);
-  const res = await fetch(url, { headers: { 'accept': 'application/json' } });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!data.features || !data.features.length) return null;
-  return data.features[0];
-}
-
 // ===== FETCH ARRONDISSEMENT CONTOUR =====
 async function fetchArrondissementContour(lat, lng) {
   const url = `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=nom,contour,population,code&type=arrondissement-municipal&limit=1`;
@@ -509,32 +497,28 @@ function detectTop10(lat, lng) {
   return null;
 }
 
+// Detect if coordinates are in Corsica
+function isCorsica(lat, lng) {
+  return lat >= 41.3 && lat <= 43.1 && lng >= 8.5 && lng <= 9.6;
+}
+
 function findCitiesForGenerale(lat, lng) {
-  const withDist = MAJOR_CITIES.map(c => ({
-    ...c, dist: haversine(lat, lng, c.lat, c.lng)
-  })).filter(c => c.dist > 5);
-
-  // 2 nearest metropoles > 100k
-  const nearest2 = withDist
-    .filter(c => c.pop >= 100000)
-    .sort((a,b) => a.dist - b.dist)
-    .slice(0, 2);
-
-  // Also include nearest top-10 city if within 150km and not already in the list
+  // 1. Nearest top-10 city within 150km → use only that
   const top10WithDist = TOP10_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
   })).filter(c => c.dist > 5 && c.dist <= 150)
     .sort((a,b) => a.dist - b.dist);
 
   if (top10WithDist.length > 0) {
-    const nearestTop10 = top10WithDist[0];
-    const alreadyIncluded = nearest2.some(c => c.nom === nearestTop10.nom);
-    if (!alreadyIncluded) {
-      nearest2.push(nearestTop10);
-    }
+    return [top10WithDist[0]];
   }
 
-  return nearest2;
+  // 2. No top-10 nearby → 2 nearest metropoles > 100k
+  return MAJOR_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5 && c.pop >= 100000)
+    .sort((a,b) => a.dist - b.dist)
+    .slice(0, 2);
 }
 
 function citiesBounds(lat, lng, cities) {
@@ -658,14 +642,24 @@ async function go() {
       // ===== STANDARD (no top-10 nearby) =====
       modeLabel = 'standard';
 
-      // GÉNÉRALE — 2 nearest métropoles >100k
-      gCities = findCitiesForGenerale(bien.lat, bien.lng);
-      if (gCities.length > 0) {
-        const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
-        padBounds(gBounds, 0.08);
-        mapG.fitBounds(gBounds);
+      if (isCorsica(bien.lat, bien.lng)) {
+        // CORSE → cadrer sur l'île
+        modeLabel = 'Corse';
+        const corseBounds = new google.maps.LatLngBounds(
+          { lat: 41.38, lng: 8.57 },  // SW
+          { lat: 43.03, lng: 9.57 }   // NE
+        );
+        mapG.fitBounds(corseBounds);
       } else {
-        mapG.fitBounds(boundsFromRadius(bien.lat, bien.lng, 75));
+        // GÉNÉRALE — nearest top-10 within 150km, or 2 nearest métropoles >100k
+        gCities = findCitiesForGenerale(bien.lat, bien.lng);
+        if (gCities.length > 0) {
+          const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
+          padBounds(gBounds, 0.08);
+          mapG.fitBounds(gBounds);
+        } else {
+          mapG.fitBounds(boundsFromRadius(bien.lat, bien.lng, 75));
+        }
       }
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
@@ -690,7 +684,6 @@ async function go() {
 
     // Clear any previous polygons
     clearPolygons(currentPolygonsA);
-    clearPolygons(currentPolygonsC);
     clearViewportParcels();
 
     try {
@@ -718,16 +711,6 @@ async function go() {
 
         // Load nearby parcels immediately (150m radius around bien)
         loadParcellesAroundPoint(bien.lat, bien.lng);
-
-        // Fetch section contour
-        if (codeInsee && section) {
-          try {
-            const sectionData = await fetchSectionCadastre(codeInsee, section);
-            if (sectionData) {
-              drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
-            }
-          } catch(e) { /* silent */ }
-        }
 
         document.getElementById('cadastreRef').textContent = cadastreRef;
         console.log('Parcelle cadastrale:', props);
@@ -1073,7 +1056,6 @@ function toggleParcelle(polygon, feature) {
 
   updateCadastreRefDisplay();
   updateAerienneFromSelection();
-  updateSectionContour();
 }
 
 function updateCadastreRefDisplay() {
@@ -1146,32 +1128,6 @@ function updateAerienneFromSelection() {
     bounds.union(b);
   });
   mapA.fitBounds(bounds);
-}
-
-async function updateSectionContour() {
-  clearPolygons(currentPolygonsC);
-
-  if (selectedParcels.length === 0) return;
-
-  // Get unique sections
-  const sections = new Set();
-  selectedParcels.forEach(sp => {
-    const p = sp.feature.properties || {};
-    const key = `${p.code_insee || p.commune}-${p.section}`;
-    sections.add(key);
-  });
-
-  for (const key of sections) {
-    const [codeInsee, section] = key.split('-');
-    if (codeInsee && section) {
-      try {
-        const sectionData = await fetchSectionCadastre(codeInsee, section);
-        if (sectionData) {
-          drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
-        }
-      } catch(e) { /* silent */ }
-    }
-  }
 }
 
 function onGoogleMapsReady() {
