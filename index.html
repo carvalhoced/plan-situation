@@ -702,6 +702,9 @@ async function go() {
         // Store for viewport loader to recognize
         window._initialParcelId = `${section}-${numero}`;
 
+        // Load nearby parcels immediately (150m radius around bien)
+        loadParcellesAroundPoint(bien.lat, bien.lng);
+
         // Fetch section contour
         if (codeInsee && section) {
           try {
@@ -914,10 +917,10 @@ function drawTrackedPolygon(map, feature, color, trackArr) {
 }
 
 // Viewport parcels
-let viewportParcels = []; // { polygon, feature, id } objects
+let viewportParcels = [];
 let selectedParcelPoly = null;
 let isLoadingParcels = false;
-let loadedParcelIds = new Set(); // track what's already drawn
+let loadedParcelIds = new Set();
 
 function clearViewportParcels() {
   viewportParcels.forEach(vp => vp.polygon.setMap(null));
@@ -926,23 +929,36 @@ function clearViewportParcels() {
   selectedParcelPoly = null;
 }
 
+// Load parcels in a small radius around a point (for initial load)
+async function loadParcellesAroundPoint(lat, lng) {
+  const d = 0.0015; // ~150m in degrees
+  const geom = JSON.stringify({
+    type: 'Polygon',
+    coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
+  });
+  await loadParcellesFromGeom(geom);
+}
+
+// Load parcels from viewport bounds (for navigation)
 async function loadParcellesInViewport() {
-  if (isLoadingParcels) return;
-  isLoadingParcels = true;
-
   const bounds = mapC.getBounds();
-  if (!bounds) { isLoadingParcels = false; return; }
-
+  if (!bounds) return;
   const ne = bounds.getNorthEast();
   const sw = bounds.getSouthWest();
-
   const geom = JSON.stringify({
     type: 'Polygon',
     coordinates: [[[sw.lng(), sw.lat()], [ne.lng(), sw.lat()], [ne.lng(), ne.lat()], [sw.lng(), ne.lat()], [sw.lng(), sw.lat()]]]
   });
+  await loadParcellesFromGeom(geom);
+}
+
+// Shared logic: fetch parcels in a geom and add interactive polygons
+async function loadParcellesFromGeom(geom) {
+  if (isLoadingParcels) return;
+  isLoadingParcels = true;
 
   try {
-    const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=50`;
+    const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=100`;
     const res = await fetch(url, { headers: { 'accept': 'application/json' } });
     if (!res.ok) { isLoadingParcels = false; return; }
     const data = await res.json();
@@ -953,17 +969,14 @@ async function loadParcellesInViewport() {
       const props = feature.properties || {};
       const parcelId = `${props.commune}-${props.section}-${props.numero}`;
 
-      // Skip already loaded
       if (loadedParcelIds.has(parcelId)) return;
       loadedParcelIds.add(parcelId);
 
-      const geom = feature.geometry;
-      const coords = geom.type === 'MultiPolygon'
-        ? geom.coordinates[0][0]
-        : geom.coordinates[0];
+      const coords = feature.geometry.type === 'MultiPolygon'
+        ? feature.geometry.coordinates[0][0]
+        : feature.geometry.coordinates[0];
       const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
 
-      // Is this the initially selected parcel?
       const isSelected = (window._initialParcelId && `${props.section}-${props.numero}` === window._initialParcelId);
 
       const polygon = new google.maps.Polygon({
@@ -993,7 +1006,6 @@ async function loadParcellesInViewport() {
             strokeColor: '#521DA5', strokeOpacity: 0.6, strokeWeight: 2,
           });
         }
-        // Show parcel number on hover
         document.getElementById('cadastreRef').textContent =
           `Section ${props.section || '?'} · Parcelle n°${props.numero || '?'}` +
           (polygon === selectedParcelPoly ? ' ✓' : ' — cliquez pour sélectionner');
@@ -1003,7 +1015,6 @@ async function loadParcellesInViewport() {
         if (polygon !== selectedParcelPoly) {
           polygon.setOptions({ fillOpacity: 0, strokeOpacity: 0, strokeWeight: 0 });
         }
-        // Restore selected ref
         if (selectedParcelPoly && selectedParcelPoly._feature) {
           const sp = selectedParcelPoly._feature.properties || {};
           document.getElementById('cadastreRef').textContent =
@@ -1020,7 +1031,7 @@ async function loadParcellesInViewport() {
     if (added > 0) console.log(`+${added} parcelles (total: ${viewportParcels.length})`);
 
   } catch(e) {
-    console.warn('Viewport parcels load failed:', e);
+    console.warn('Parcels load failed:', e);
   }
 
   isLoadingParcels = false;
