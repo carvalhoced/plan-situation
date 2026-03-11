@@ -260,6 +260,10 @@ function initMaps() {
   // Load parcels with debounce on map move
   let cadastreIdleTimer = null;
   mapC.addListener('idle', () => {
+    // Live zoom display
+    const zEl = document.getElementById('cadastreZoomLevel');
+    if (zEl) zEl.textContent = mapC.getZoom();
+
     if (cadastreIdleTimer) clearTimeout(cadastreIdleTimer);
     cadastreIdleTimer = setTimeout(() => {
       if (mapC.getZoom() >= 18) {
@@ -929,7 +933,13 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreR
   document.getElementById('algoCadastre').innerHTML = `<h4>Cadastre</h4>
     <p>Tuiles IGN Parcellaire Express</p>
     <p><span class="value">${cadastreRef || '—'}</span></p>
-    <p>Contour section + parcelle (API Carto)</p>`;
+    <p>Zoom: <span class="value" id="cadastreZoomLevel">…</span></p>`;
+
+  // Update zoom after map settles
+  google.maps.event.addListenerOnce(mapC, 'idle', () => {
+    const el = document.getElementById('cadastreZoomLevel');
+    if (el) el.textContent = mapC.getZoom();
+  });
 }
 
 // ===== CAPTURE via Static Maps API =====
