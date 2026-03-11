@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plans de situation — Auto-cadrage Google Maps</title>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #521DA5;
+    --primary-hover: #3a0d4f;
+    --text: #333333;
+    --text-light: #888;
+    --border: #e1e1e1;
+    --surface: #ffffff;
+    --bg: #f8f8fa;
+    --rose: #E5007D;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Ubuntu', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+
+  .subtitle { font-size: 13px; color: var(--text-light); margin-bottom: 20px; }
+
+  .search-bar {
+    display: flex; gap: 10px; margin-bottom: 24px; max-width: 700px;
+  }
+
+  .search-bar input {
+    flex: 1; font-family: 'Ubuntu', sans-serif; font-size: 14px;
+    padding: 10px 16px; border: 1.5px solid var(--border);
+    border-radius: 8px; outline: none; transition: border-color 0.2s;
+  }
+
+  .search-bar input:focus { border-color: var(--primary); }
+
+  .search-bar button {
+    font-family: 'Ubuntu', sans-serif; font-size: 13px; font-weight: 600;
+    padding: 10px 20px; background: var(--primary); color: white;
+    border: none; border-radius: 8px; cursor: pointer;
+    transition: background 0.2s; white-space: nowrap;
+  }
+
+  .search-bar button:hover { background: var(--primary-hover); }
+  .search-bar button:disabled { opacity: 0.5; cursor: wait; }
+
+  .maps-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 20px; margin-bottom: 24px;
+  }
+
+  .map-card {
+    background: var(--surface); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06); border: 1px solid var(--border);
+  }
+
+  .map-label {
+    background: var(--rose); color: white; font-size: 13px; font-weight: 600;
+    text-align: center; padding: 10px 16px; letter-spacing: 0.02em;
+  }
+
+  .map-container { height: 380px; }
+
+  .capture-btn {
+    width: 100%; padding: 10px; border: none;
+    background: #f5f5f5; color: var(--text);
+    font-family: 'Ubuntu', sans-serif; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: background 0.2s;
+    border-top: 1px solid var(--border);
+  }
+
+  .capture-btn:hover { background: var(--primary); color: white; }
+
+  .algo-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
+  }
+
+  .algo-panel h3 { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--primary); }
+
+  .algo-details { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+
+  .algo-col h4 {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--rose); margin-bottom: 8px;
+  }
+
+  .algo-col p { font-size: 12px; color: var(--text); line-height: 1.6; }
+  .algo-col .value { font-weight: 600; color: var(--primary); }
+
+  .status { font-size: 12px; color: var(--text-light); margin-bottom: 16px; min-height: 18px; }
+  .status.error { color: #d32f2f; }
+  .status.loading { color: var(--primary); }
+
+  @media (max-width: 900px) {
+    .maps-grid { grid-template-columns: 1fr; }
+    .algo-details { grid-template-columns: 1fr; }
+    .map-container { height: 300px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Plans de situation — Auto-cadrage</h1>
+<p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
+
+<div class="search-bar">
+  <input type="text" id="addressInput" placeholder="Adresse du bien" value="43 Rue de la Paix 66700 Argelès-sur-Mer">
+  <button id="goBtn" onclick="go()">Générer les plans</button>
+</div>
+
+<div class="status" id="status"></div>
+
+<div class="maps-grid">
+  <div class="map-card">
+    <div class="map-label">Situation GÉNÉRALE</div>
+    <div class="map-container" id="mapGeneral"></div>
+    <button class="capture-btn" onclick="capture('general')">Capturer</button>
+  </div>
+  <div class="map-card">
+    <div class="map-label">Situation PARTICULIÈRE</div>
+    <div class="map-container" id="mapParticuliere"></div>
+    <button class="capture-btn" onclick="capture('particuliere')">Capturer</button>
+  </div>
+  <div class="map-card">
+    <div class="map-label">Vue AÉRIENNE</div>
+    <div class="map-container" id="mapAerienne"></div>
+    <button class="capture-btn" onclick="capture('aerienne')">Capturer</button>
+  </div>
+</div>
+
+<div class="algo-panel" id="algoPanel" style="display:none">
+  <h3>Détail de l'algorithme de cadrage</h3>
+  <div class="algo-details">
+    <div class="algo-col" id="algoGeneral"><h4>Générale</h4><p>—</p></div>
+    <div class="algo-col" id="algoParticuliere"><h4>Particulière</h4><p>—</p></div>
+    <div class="algo-col" id="algoAerienne"><h4>Aérienne</h4><p>—</p></div>
+  </div>
+</div>
+
+<script>
+const API_KEY = 'AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g';
+
+let mapG, mapP, mapA;
+let markerG, markerP, markerA;
+
+// ===== PIN ICON =====
+const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
+
+// ===== INIT MAPS =====
+function initMaps() {
+  const defaultCenter = { lat: 46.6, lng: 2.5 };
+  const mapOpts = {
+    center: defaultCenter, zoom: 6,
+    disableDefaultUI: true,
+    zoomControl: false,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false,
+  };
+
+  mapG = new google.maps.Map(document.getElementById('mapGeneral'), {
+    ...mapOpts, mapTypeId: 'roadmap'
+  });
+  mapP = new google.maps.Map(document.getElementById('mapParticuliere'), {
+    ...mapOpts, mapTypeId: 'roadmap'
+  });
+  mapA = new google.maps.Map(document.getElementById('mapAerienne'), {
+    ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
+  });
+}
+
+// ===== ADD MARKER =====
+function addMarker(map, lat, lng) {
+  return new google.maps.Marker({
+    position: { lat, lng },
+    map: map,
+    icon: {
+      url: PIN_SVG,
+      scaledSize: new google.maps.Size(28, 42),
+      anchor: new google.maps.Point(14, 42),
+    }
+  });
+}
+
+// ===== STATUS =====
+function setStatus(msg, type = '') {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status ' + type;
+}
+
+// ===== GEOCODE via BAN =====
+async function geocode(address) {
+  const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}&limit=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (!data.features || !data.features.length) throw new Error('Adresse non trouvée');
+  const coords = data.features[0].geometry.coordinates;
+  return { lat: coords[1], lng: coords[0], display: data.features[0].properties.label };
+}
+
+// ===== HAVERSINE =====
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ===== GEOJSON → Google Maps LatLngBounds =====
+function geojsonToBounds(geojson) {
+  const bounds = new google.maps.LatLngBounds();
+  function addCoords(coords) {
+    if (typeof coords[0] === 'number') {
+      // [lng, lat]
+      bounds.extend({ lat: coords[1], lng: coords[0] });
+    } else {
+      coords.forEach(c => addCoords(c));
+    }
+  }
+  addCoords(geojson.coordinates);
+  return bounds;
+}
+
+// ===== PAD BOUNDS =====
+function padBounds(bounds, factor) {
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const latPad = (ne.lat() - sw.lat()) * factor;
+  const lngPad = (ne.lng() - sw.lng()) * factor;
+  bounds.extend({ lat: ne.lat() + latPad, lng: ne.lng() + lngPad });
+  bounds.extend({ lat: sw.lat() - latPad, lng: sw.lng() - lngPad });
+  return bounds;
+}
+
+// ===== BOUNDS FROM RADIUS =====
+function boundsFromRadius(lat, lng, radiusKm) {
+  const degLat = radiusKm / 111;
+  const degLng = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+  const bounds = new google.maps.LatLngBounds();
+  bounds.extend({ lat: lat - degLat, lng: lng - degLng });
+  bounds.extend({ lat: lat + degLat, lng: lng + degLng });
+  return bounds;
+}
+
+// ===== DRAW COMMUNE CONTOUR (dark gray, visible) =====
+function drawCommuneContour(map, geojson) {
+  const coords = geojson.type === 'MultiPolygon'
+    ? geojson.coordinates[0][0]
+    : geojson.coordinates[0];
+
+  const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+
+  new google.maps.Polygon({
+    paths: path,
+    strokeColor: '#521DA5',
+    strokeOpacity: 0.85,
+    strokeWeight: 2.5,
+    fillOpacity: 0,
+    map: map,
+  });
+}
+
+// ===== FETCH PARCELLE CADASTRALE (IGN API Carto) =====
+async function fetchParcelleCadastre(lat, lng) {
+  // API requires a Polygon geometry — create a tiny 10m square around the point
+  const d = 0.00005; // ~5m in degrees
+  const geom = JSON.stringify({
+    type: 'Polygon',
+    coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
+  });
+  const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=1`;
+  console.log('Cadastre URL:', url);
+  const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+  if (!res.ok) {
+    console.warn('Cadastre HTTP error:', res.status, await res.text());
+    return null;
+  }
+  const data = await res.json();
+  console.log('Cadastre response:', data);
+  if (!data.features || !data.features.length) return null;
+  return data.features[0];
+}
+
+// ===== DRAW PARCELLE ON MAP =====
+function drawParcelleOnMap(map, feature) {
+  const geom = feature.geometry;
+  const coords = geom.type === 'MultiPolygon'
+    ? geom.coordinates[0][0]
+    : geom.coordinates[0];
+
+  const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+
+  new google.maps.Polygon({
+    paths: path,
+    strokeColor: '#521DA5',
+    strokeOpacity: 0.85,
+    strokeWeight: 2.5,
+    fillColor: '#521DA5',
+    fillOpacity: 0.12,
+    map: map,
+  });
+}
+
+// ===== FETCH COMMUNE CONTOUR =====
+async function fetchCommuneContour(lat, lng) {
+  const url = `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=nom,contour,population,surface&limit=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (!data.length || !data[0].contour) return null;
+  return data[0];
+}
+
+
+// ===== MAJOR FRENCH CITIES =====
+const MAJOR_CITIES = [
+  { nom:'Paris', lat:48.8566, lng:2.3522, pop:2165423 },
+  { nom:'Marseille', lat:43.2965, lng:5.3698, pop:870018 },
+  { nom:'Lyon', lat:45.7640, lng:4.8357, pop:522969 },
+  { nom:'Toulouse', lat:43.6047, lng:1.4442, pop:504078 },
+  { nom:'Nice', lat:43.7102, lng:7.2620, pop:342669 },
+  { nom:'Nantes', lat:47.2184, lng:-1.5536, pop:318808 },
+  { nom:'Montpellier', lat:43.6108, lng:3.8767, pop:295542 },
+  { nom:'Strasbourg', lat:48.5734, lng:7.7521, pop:287228 },
+  { nom:'Bordeaux', lat:44.8378, lng:-0.5792, pop:260958 },
+  { nom:'Lille', lat:50.6292, lng:3.0573, pop:236234 },
+  { nom:'Rennes', lat:48.1173, lng:-1.6778, pop:222485 },
+  { nom:'Reims', lat:49.2583, lng:3.5803, pop:182211 },
+  { nom:'Saint-Étienne', lat:45.4397, lng:4.3872, pop:177480 },
+  { nom:'Toulon', lat:43.1242, lng:5.9280, pop:176198 },
+  { nom:'Le Havre', lat:49.4944, lng:0.1079, pop:170147 },
+  { nom:'Grenoble', lat:45.1885, lng:5.7245, pop:158454 },
+  { nom:'Dijon', lat:47.3220, lng:5.0415, pop:159346 },
+  { nom:'Angers', lat:47.4784, lng:-0.5632, pop:155876 },
+  { nom:'Nîmes', lat:43.8367, lng:4.3601, pop:151001 },
+  { nom:'Clermont-Ferrand', lat:45.7772, lng:3.0870, pop:147284 },
+  { nom:'Aix-en-Provence', lat:43.5297, lng:5.4474, pop:145133 },
+  { nom:'Le Mans', lat:48.0061, lng:0.1996, pop:145421 },
+  { nom:'Brest', lat:48.3904, lng:-4.4861, pop:142722 },
+  { nom:'Tours', lat:47.3941, lng:0.6848, pop:139958 },
+  { nom:'Amiens', lat:49.8941, lng:2.2958, pop:136105 },
+  { nom:'Limoges', lat:45.8336, lng:1.2611, pop:133968 },
+  { nom:'Metz', lat:49.1193, lng:6.1757, pop:120205 },
+  { nom:'Perpignan', lat:42.6887, lng:2.8948, pop:121875 },
+  { nom:'Besançon', lat:47.2378, lng:6.0241, pop:120271 },
+  { nom:'Orléans', lat:47.9029, lng:1.9093, pop:116685 },
+  { nom:'Rouen', lat:49.4432, lng:1.0999, pop:114007 },
+  { nom:'Caen', lat:49.1829, lng:-0.3707, pop:108365 },
+  { nom:'Nancy', lat:48.6921, lng:6.1844, pop:105058 },
+  { nom:'Avignon', lat:43.9493, lng:4.8055, pop:93671 },
+  { nom:'Poitiers', lat:46.5802, lng:0.3404, pop:90293 },
+  { nom:'La Rochelle', lat:46.1591, lng:-1.1520, pop:79014 },
+  { nom:'Pau', lat:43.2965, lng:-0.3700, pop:78506 },
+  { nom:'Bayonne', lat:43.4929, lng:-1.4748, pop:52006 },
+  { nom:'Valence', lat:44.9334, lng:4.8924, pop:65726 },
+  { nom:'Chambéry', lat:45.5646, lng:5.9178, pop:60907 },
+  { nom:'Annecy', lat:45.8992, lng:6.1294, pop:131375 },
+];
+
+// Top 10 French cities only
+const TOP10_CITIES = [
+  { nom:'Paris', lat:48.8566, lng:2.3522, pop:2175000, radiusIn: 12 },
+  { nom:'Marseille', lat:43.2965, lng:5.3698, pop:873000, radiusIn: 10 },
+  { nom:'Lyon', lat:45.7640, lng:4.8357, pop:537000, radiusIn: 8 },
+  { nom:'Toulouse', lat:43.6047, lng:1.4442, pop:502000, radiusIn: 8 },
+  { nom:'Nice', lat:43.7102, lng:7.2620, pop:338000, radiusIn: 7 },
+  { nom:'Nantes', lat:47.2184, lng:-1.5536, pop:325000, radiusIn: 7 },
+  { nom:'Montpellier', lat:43.6108, lng:3.8767, pop:300000, radiusIn: 7 },
+  { nom:'Strasbourg', lat:48.5734, lng:7.7521, pop:286000, radiusIn: 7 },
+  { nom:'Bordeaux', lat:44.8378, lng:-0.5792, pop:264000, radiusIn: 8 },
+  { nom:'Lille', lat:50.6292, lng:3.0573, pop:236000, radiusIn: 7 },
+];
+
+// Detect relationship to a top-10 city
+// Returns { city, mode: 'inside' | 'nearby' } or null
+function detectTop10(lat, lng) {
+  const NEARBY_RADIUS = 30; // km
+
+  for (const c of TOP10_CITIES) {
+    const dist = haversine(lat, lng, c.lat, c.lng);
+    if (dist <= c.radiusIn) {
+      return { city: { ...c, dist }, mode: 'inside' };
+    }
+    if (dist <= NEARBY_RADIUS) {
+      return { city: { ...c, dist }, mode: 'nearby' };
+    }
+  }
+  return null;
+}
+
+function findCitiesForGenerale(lat, lng) {
+  const withDist = MAJOR_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5);
+
+  return withDist
+    .filter(c => c.pop >= 100000)
+    .sort((a,b) => a.dist - b.dist)
+    .slice(0, 2);
+}
+
+function citiesBounds(lat, lng, cities) {
+  const bounds = new google.maps.LatLngBounds();
+  bounds.extend({ lat, lng });
+  cities.forEach(c => bounds.extend({ lat: c.lat, lng: c.lng }));
+  return bounds;
+}
+
+// ===== MAIN =====
+async function go() {
+  const address = document.getElementById('addressInput').value.trim();
+  if (!address) return;
+
+  const btn = document.getElementById('goBtn');
+  btn.disabled = true;
+  setStatus('Géocodage…', 'loading');
+
+  try {
+    // 1. Geocode
+    const bien = await geocode(address);
+    setStatus(`✓ ${bien.display} — récupération des contours…`, 'loading');
+
+    // 2. Init maps
+    initMaps();
+
+    // Clear old markers
+    if (markerG) markerG.setMap(null);
+    if (markerP) markerP.setMap(null);
+    if (markerA) markerA.setMap(null);
+
+    // Detect relationship to top-10 city
+    const top10 = detectTop10(bien.lat, bien.lng);
+    let gCities = [];
+    let communeName = '?';
+    let modeLabel = '';
+
+    if (top10 && top10.mode === 'inside') {
+      // ===== INSIDE A TOP-10 CITY =====
+      modeLabel = 'dans ' + top10.city.nom;
+      console.log('Mode INSIDE: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
+
+      // GÉNÉRALE → contour of the big city
+      try {
+        const cityCommune = await fetchCommuneContour(top10.city.lat, top10.city.lng);
+        if (cityCommune && cityCommune.contour) {
+          const cityBounds = geojsonToBounds(cityCommune.contour);
+          padBounds(cityBounds, 0.08);
+          cityBounds.extend({ lat: bien.lat, lng: bien.lng });
+          mapG.fitBounds(cityBounds);
+        } else {
+          mapG.fitBounds(boundsFromRadius(top10.city.lat, top10.city.lng, 10));
+        }
+      } catch(e) {
+        mapG.fitBounds(boundsFromRadius(top10.city.lat, top10.city.lng, 10));
+      }
+      markerG = addMarker(mapG, bien.lat, bien.lng);
+
+      // PARTICULIÈRE → neighbourhood ~1.2km
+      communeName = top10.city.nom;
+      mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+      markerP = addMarker(mapP, bien.lat, bien.lng);
+
+    } else if (top10 && top10.mode === 'nearby') {
+      // ===== NEAR A TOP-10 CITY =====
+      modeLabel = 'proche de ' + top10.city.nom;
+      console.log('Mode NEARBY: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
+
+      // GÉNÉRALE → bbox bien + big city
+      const gBounds = new google.maps.LatLngBounds();
+      gBounds.extend({ lat: bien.lat, lng: bien.lng });
+      gBounds.extend({ lat: top10.city.lat, lng: top10.city.lng });
+      padBounds(gBounds, 0.15);
+      mapG.fitBounds(gBounds);
+      markerG = addMarker(mapG, bien.lat, bien.lng);
+
+      // PARTICULIÈRE → standard commune logic
+      communeName = await doParticuliereStandard(bien);
+      markerP = addMarker(mapP, bien.lat, bien.lng);
+
+    } else {
+      // ===== STANDARD (no top-10 nearby) =====
+      modeLabel = 'standard';
+
+      // GÉNÉRALE — 2 nearest métropoles >100k
+      gCities = findCitiesForGenerale(bien.lat, bien.lng);
+      if (gCities.length > 0) {
+        const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
+        padBounds(gBounds, 0.08);
+        mapG.fitBounds(gBounds);
+      } else {
+        mapG.fitBounds(boundsFromRadius(bien.lat, bien.lng, 75));
+      }
+      markerG = addMarker(mapG, bien.lat, bien.lng);
+
+      // PARTICULIÈRE → standard commune logic
+      communeName = await doParticuliereStandard(bien);
+      markerP = addMarker(mapP, bien.lat, bien.lng);
+    }
+
+    // ===== DRAW COMMUNE MASK on Particulière only =====
+    try {
+      const contourData = await fetchCommuneContour(bien.lat, bien.lng);
+      if (contourData && contourData.contour) {
+        drawCommuneContour(mapP, contourData.contour);
+      }
+    } catch(e) { /* silent */ }
+
+    // ===== AÉRIENNE — Satellite, vue plate, cadré sur parcelle =====
+    mapA.setTilt(0);
+
+    // ===== CADASTRE — Parcelle overlay on Aérienne =====
+    try {
+      const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
+      if (parcelle) {
+        drawParcelleOnMap(mapA, parcelle);
+        // Fit to parcelle bounds with padding so contour is fully visible
+        const parcelleBounds = geojsonToBounds(parcelle.geometry);
+        mapA.fitBounds(parcelleBounds);
+        console.log('Parcelle cadastrale:', parcelle.properties);
+      } else {
+        // No parcelle found: fallback center on bien
+        mapA.setCenter({ lat: bien.lat, lng: bien.lng });
+        mapA.setZoom(19);
+      }
+    } catch(e) {
+      console.warn('Cadastre failed:', e);
+      mapA.setCenter({ lat: bien.lat, lng: bien.lng });
+      mapA.setZoom(19);
+    }
+
+    // ===== ALGO DETAILS =====
+    showAlgoDetails(bien, gCities, communeName, top10, modeLabel);
+    setStatus(address + ' — mode: ' + modeLabel, '');
+
+  } catch(err) {
+    setStatus('Erreur: ' + err.message, 'error');
+    console.error(err);
+  }
+
+  btn.disabled = false;
+}
+
+// ===== STANDARD PARTICULIÈRE LOGIC (shared by nearby + standard) =====
+async function doParticuliereStandard(bien) {
+  let communeName = '?';
+  try {
+    // 1. Get commune name from geo.api.gouv.fr
+    const communeData = await fetchCommuneContour(bien.lat, bien.lng);
+    if (communeData) {
+      communeName = communeData.nom;
+    }
+
+    // 2. Use Google Geocoder viewport (= inhabited area framing, not admin boundary)
+    if (communeName !== '?') {
+      const viewport = await getGoogleViewport(communeName);
+      if (viewport) {
+        mapP.fitBounds(viewport);
+        // Zoom in one extra level for tighter framing
+        google.maps.event.addListenerOnce(mapP, 'idle', () => {
+          mapP.setZoom(mapP.getZoom() + 1);
+        });
+        console.log(communeName + ': Google viewport + zoom +1');
+        return communeName;
+      }
+    }
+
+    // 3. Fallback: contour geo.api.gouv.fr
+    if (communeData && communeData.contour) {
+      const contourBounds = geojsonToBounds(communeData.contour);
+      mapP.fitBounds(contourBounds);
+      console.log(communeName + ': fallback contour');
+    } else {
+      mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
+    }
+  } catch(e) {
+    console.warn('Particuliere failed:', e);
+    mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
+  }
+  return communeName;
+}
+
+// Google Geocoder: get viewport bounds for a place name
+function getGoogleViewport(placeName) {
+  return new Promise((resolve) => {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: placeName + ', France' }, (results, status) => {
+      if (status === 'OK' && results[0] && results[0].geometry.viewport) {
+        resolve(results[0].geometry.viewport);
+      } else {
+        console.warn('Google Geocoder: no viewport for', placeName, status);
+        resolve(null);
+      }
+    });
+  });
+}
+
+
+// Store last bien for capture
+let lastBien = null;
+
+function showAlgoDetails(bien, gCities, communeName, top10, modeLabel) {
+  lastBien = bien;
+  document.getElementById('algoPanel').style.display = 'block';
+
+  if (top10 && top10.mode === 'inside') {
+    document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
+      <p>Mode <span class="value">dans ${top10.city.nom}</span></p>
+      <p>Contour de la ville (${top10.city.dist.toFixed(0)}km du centre)</p>`;
+    document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
+      <p>Niveau <span class="value">quartier</span> · rayon ~1.2 km</p>`;
+
+  } else if (top10 && top10.mode === 'nearby') {
+    document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
+      <p>Mode <span class="value">proche de ${top10.city.nom}</span></p>
+      <p>Bbox bien ↔ ${top10.city.nom} (${top10.city.dist.toFixed(0)}km)</p>`;
+    document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
+      <p>Commune: <span class="value">${communeName || '?'}</span></p>
+      <p>Contour vs rayon urbain</p>`;
+
+  } else {
+    const citiesList = gCities.slice(0, 4).map(c =>
+      `${c.nom} (${(c.pop/1000).toFixed(0)}k, ${c.dist.toFixed(0)}km)`
+    ).join(', ');
+    document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
+      <p>Mode <span class="value">standard</span> · ${gCities.length} métropoles</p>
+      <p style="font-size:11px;color:#888;margin-top:4px">${citiesList}</p>`;
+    document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
+      <p>Commune: <span class="value">${communeName || '?'}</span></p>
+      <p>Contour vs rayon urbain</p>`;
+  }
+
+  document.getElementById('algoAerienne').innerHTML = `<h4>Aérienne</h4>
+    <p>Google Maps <span class="value">satellite</span> · zoom <span class="value">19</span> · vue plate</p>
+    <p>Parcelle cadastrale (API Carto IGN)</p>
+    <p>${bien.lat.toFixed(5)}, ${bien.lng.toFixed(5)}</p>`;
+}
+
+// ===== CAPTURE via Static Maps API =====
+async function capture(type) {
+  let map, mapType, filename;
+  if (type === 'general') { map = mapG; mapType = 'roadmap'; filename = 'situation-generale'; }
+  else if (type === 'particuliere') { map = mapP; mapType = 'roadmap'; filename = 'situation-particuliere'; }
+  else { map = mapA; mapType = 'satellite'; filename = 'vue-aerienne'; }
+
+  if (!map || !lastBien) return;
+
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const w = 640, h = 480; // scale=2 → 1280x960 actual pixels
+
+  // Build Static Maps URL
+  const url = `https://maps.googleapis.com/maps/api/staticmap?`
+    + `center=${center.lat()},${center.lng()}`
+    + `&zoom=${zoom}`
+    + `&size=${w}x${h}`
+    + `&scale=2`
+    + `&maptype=${mapType}`
+    + `&markers=color:0xE5007D|${lastBien.lat},${lastBien.lng}`
+    + `&key=${API_KEY}`;
+
+  // Fetch as blob → download
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = `${filename}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch(e) {
+    // Fallback: open in new tab
+    window.open(url, '_blank');
+  }
+}
+
+document.getElementById('addressInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') go();
+});
+
+function onGoogleMapsReady() {
+  initMaps();
+  go();
+}
+</script>
+
+<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g&callback=onGoogleMapsReady"></script>
+
+</body>
+</html>
