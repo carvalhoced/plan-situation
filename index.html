@@ -85,6 +85,14 @@
     border-top: 1px solid var(--border); min-height: 20px;
   }
 
+  .click-hint {
+    padding: 6px 16px; font-size: 11px; color: var(--text-light);
+    background: #fffbe6; border-top: 1px solid #f0e6b8;
+    text-align: center;
+  }
+
+  #mapAerienne, #mapCadastre { cursor: crosshair; }
+
   .algo-panel {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
@@ -119,7 +127,7 @@
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
-  <input type="text" id="addressInput" placeholder="Adresse du bien" value="43 Rue de la Paix 66700 Argelès-sur-Mer">
+  <input type="text" id="addressInput" placeholder="Adresse du bien" value="5 IMPASSE DE L'ALMA 66390 BAIXAS FRANCE">
   <button id="goBtn" onclick="go()">Générer les plans</button>
 </div>
 
@@ -139,12 +147,14 @@
   <div class="map-card">
     <div class="map-label">Vue AÉRIENNE</div>
     <div class="map-container" id="mapAerienne"></div>
+    <div class="click-hint">Cliquez pour repositionner la parcelle</div>
     <button class="capture-btn" onclick="capture('aerienne')">Capturer</button>
   </div>
   <div class="map-card">
     <div class="map-label">Plan CADASTRAL</div>
     <div class="map-container" id="mapCadastre"></div>
     <div class="cadastre-ref" id="cadastreRef"></div>
+    <div class="click-hint">Cliquez pour repositionner la parcelle</div>
     <button class="capture-btn" onclick="capture('cadastre')">Capturer</button>
   </div>
 </div>
@@ -164,6 +174,8 @@ const API_KEY = 'AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g';
 
 let mapG, mapP, mapA, mapC;
 let markerG, markerP, markerA;
+let currentPolygonsA = [];
+let currentPolygonsC = [];
 
 // ===== PIN ICON =====
 const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
@@ -509,9 +521,31 @@ async function go() {
       }
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
-      // PARTICULIÈRE → neighbourhood ~1.2km
-      communeName = top10.city.nom;
-      mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+      // PARTICULIÈRE → arrondissement (Paris/Lyon/Marseille) or neighbourhood
+      const citiesWithArrondissements = ['Paris', 'Marseille', 'Lyon'];
+      if (citiesWithArrondissements.includes(top10.city.nom)) {
+        // Fetch commune at bien's coordinates → returns the arrondissement
+        try {
+          const arrData = await fetchCommuneContour(bien.lat, bien.lng);
+          if (arrData && arrData.contour) {
+            communeName = arrData.nom; // ex: "Paris 11e Arrondissement"
+            const arrBounds = geojsonToBounds(arrData.contour);
+            mapP.fitBounds(arrBounds);
+            drawCommuneContour(mapP, arrData.contour);
+            console.log('Arrondissement:', communeName);
+          } else {
+            communeName = top10.city.nom;
+            mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+          }
+        } catch(e) {
+          communeName = top10.city.nom;
+          mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+        }
+      } else {
+        // Autres grandes villes sans arrondissements → rayon 1.2km
+        communeName = top10.city.nom;
+        mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+      }
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else if (top10 && top10.mode === 'nearby') {
@@ -551,17 +585,23 @@ async function go() {
       markerP = addMarker(mapP, bien.lat, bien.lng);
     }
 
-    // ===== DRAW COMMUNE MASK on Particulière only =====
-    try {
-      const contourData = await fetchCommuneContour(bien.lat, bien.lng);
-      if (contourData && contourData.contour) {
-        drawCommuneContour(mapP, contourData.contour);
-      }
-    } catch(e) { /* silent */ }
+    // ===== DRAW COMMUNE CONTOUR on Particulière (not for inside mode — already handled) =====
+    if (!top10 || top10.mode !== 'inside') {
+      try {
+        const contourData = await fetchCommuneContour(bien.lat, bien.lng);
+        if (contourData && contourData.contour) {
+          drawCommuneContour(mapP, contourData.contour);
+        }
+      } catch(e) { /* silent */ }
+    }
 
     // ===== AÉRIENNE + PLAN CADASTRAL =====
     mapA.setTilt(0);
     let cadastreRef = '';
+
+    // Clear any previous polygons
+    clearPolygons(currentPolygonsA);
+    clearPolygons(currentPolygonsC);
 
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
@@ -573,14 +613,13 @@ async function go() {
         cadastreRef = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
 
         // === AÉRIENNE: parcelle contour + fit ===
-        drawParcelleOnMap(mapA, parcelle);
+        drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
 
-        // === PLAN CADASTRAL: center on parcelle, zoom 19, with IGN tiles ===
-        drawParcelleOnMap(mapC, parcelle, '#E5007D');
+        // === PLAN CADASTRAL ===
+        drawTrackedPolygon(mapC, parcelle, '#E5007D', currentPolygonsC);
         mapC.fitBounds(parcelleBounds);
-        // Zoom out one level for context on cadastre
         google.maps.event.addListenerOnce(mapC, 'idle', () => {
           const z = mapC.getZoom();
           if (z > 18) mapC.setZoom(z - 1);
@@ -591,13 +630,12 @@ async function go() {
           try {
             const sectionData = await fetchSectionCadastre(codeInsee, section);
             if (sectionData) {
-              drawParcelleOnMap(mapC, sectionData, '#521DA5');
+              drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
               console.log('Section cadastrale:', sectionData.properties);
             }
           } catch(e) { console.warn('Section fetch failed:', e); }
         }
 
-        // Display reference
         document.getElementById('cadastreRef').textContent = cadastreRef;
         console.log('Parcelle cadastrale:', props);
       } else {
@@ -694,7 +732,8 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreR
       <p>Mode <span class="value">dans ${top10.city.nom}</span></p>
       <p>Contour de la ville (${top10.city.dist.toFixed(0)}km du centre)</p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
-      <p>Niveau <span class="value">quartier</span> · rayon ~1.2 km</p>`;
+      <p><span class="value">${communeName || 'quartier'}</span></p>
+      <p>${['Paris', 'Marseille', 'Lyon'].some(c => communeName.includes(c)) ? 'Contour arrondissement' : 'Rayon ~1.2 km'}</p>`;
 
   } else if (top10 && top10.mode === 'nearby') {
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
@@ -772,8 +811,97 @@ document.getElementById('addressInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') go();
 });
 
+// ===== CLICK-TO-REPOSITION =====
+
+function clearPolygons(arr) {
+  arr.forEach(p => p.setMap(null));
+  arr.length = 0;
+}
+
+function drawTrackedPolygon(map, feature, color, trackArr) {
+  const geom = feature.geometry;
+  const coords = geom.type === 'MultiPolygon'
+    ? geom.coordinates[0][0]
+    : geom.coordinates[0];
+  const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+
+  const poly = new google.maps.Polygon({
+    paths: path,
+    strokeColor: color,
+    strokeOpacity: 0.85,
+    strokeWeight: 2.5,
+    fillColor: color,
+    fillOpacity: 0.12,
+    map: map,
+  });
+  trackArr.push(poly);
+}
+
+async function repositionParcelle(lat, lng) {
+  // Update stored position
+  if (lastBien) {
+    lastBien.lat = lat;
+    lastBien.lng = lng;
+  }
+
+  // Clear old polygons
+  clearPolygons(currentPolygonsA);
+  clearPolygons(currentPolygonsC);
+
+  try {
+    const parcelle = await fetchParcelleCadastre(lat, lng);
+    if (parcelle) {
+      const props = parcelle.properties || {};
+      const section = props.section || '?';
+      const numero = props.numero || '?';
+      const codeInsee = props.code_insee || props.commune || '';
+      const ref = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
+
+      // Draw on Aérienne
+      drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
+      const parcelleBounds = geojsonToBounds(parcelle.geometry);
+      mapA.fitBounds(parcelleBounds);
+
+      // Draw on Cadastre
+      drawTrackedPolygon(mapC, parcelle, '#E5007D', currentPolygonsC);
+      mapC.fitBounds(parcelleBounds);
+      google.maps.event.addListenerOnce(mapC, 'idle', () => {
+        const z = mapC.getZoom();
+        if (z > 18) mapC.setZoom(z - 1);
+      });
+
+      // Section contour
+      if (codeInsee && section) {
+        try {
+          const sectionData = await fetchSectionCadastre(codeInsee, section);
+          if (sectionData) {
+            drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
+          }
+        } catch(e) { /* silent */ }
+      }
+
+      document.getElementById('cadastreRef').textContent = ref;
+      console.log('Repositionné:', ref);
+    } else {
+      document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée à cet emplacement';
+    }
+  } catch(e) {
+    console.warn('Reposition failed:', e);
+    document.getElementById('cadastreRef').textContent = 'Erreur de recherche cadastrale';
+  }
+}
+
 function onGoogleMapsReady() {
   initMaps();
+
+  // Add click listeners for repositioning
+  mapA.addListener('click', (e) => {
+    repositionParcelle(e.latLng.lat(), e.latLng.lng());
+  });
+  mapC.addListener('click', (e) => {
+    repositionParcelle(e.latLng.lat(), e.latLng.lng());
+  });
+
   go();
 }
 </script>
