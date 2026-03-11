@@ -212,13 +212,21 @@ function initMaps() {
     ...mapOpts, mapTypeId: 'roadmap'
   });
   mapA = new google.maps.Map(document.getElementById('mapAerienne'), {
-    ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
+    ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0, disableDoubleClickZoom: true
   });
   mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
-    ...mapOpts, mapTypeId: 'roadmap'
+    ...mapOpts, mapTypeId: 'roadmap', disableDoubleClickZoom: true
   });
   // Add cadastre tiles overlay
   mapC.overlayMapTypes.push(createCadastreOverlay());
+
+  // Click-to-reposition on Aérienne and Cadastre
+  mapA.addListener('click', (e) => {
+    repositionParcelle(e.latLng.lat(), e.latLng.lng());
+  });
+  mapC.addListener('click', (e) => {
+    repositionParcelle(e.latLng.lat(), e.latLng.lng());
+  });
 }
 
 // ===== ADD MARKER =====
@@ -524,14 +532,24 @@ async function go() {
       // PARTICULIÈRE → arrondissement (Paris/Lyon/Marseille) or neighbourhood
       const citiesWithArrondissements = ['Paris', 'Marseille', 'Lyon'];
       if (citiesWithArrondissements.includes(top10.city.nom)) {
-        // Fetch commune at bien's coordinates → returns the arrondissement
         try {
           const arrData = await fetchCommuneContour(bien.lat, bien.lng);
-          if (arrData && arrData.contour) {
+          if (arrData && arrData.nom) {
             communeName = arrData.nom; // ex: "Paris 11e Arrondissement"
-            const arrBounds = geojsonToBounds(arrData.contour);
-            mapP.fitBounds(arrBounds);
-            drawCommuneContour(mapP, arrData.contour);
+            // Use Google viewport for zoom (same as standard communes)
+            const viewport = await getGoogleViewport(communeName);
+            if (viewport) {
+              mapP.fitBounds(viewport);
+              google.maps.event.addListenerOnce(mapP, 'idle', () => {
+                mapP.setZoom(mapP.getZoom() + 1);
+              });
+            } else {
+              mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+            }
+            // Draw arrondissement contour
+            if (arrData.contour) {
+              drawCommuneContour(mapP, arrData.contour);
+            }
             console.log('Arrondissement:', communeName);
           } else {
             communeName = top10.city.nom;
@@ -542,9 +560,21 @@ async function go() {
           mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       } else {
-        // Autres grandes villes sans arrondissements → rayon 1.2km
+        // Autres grandes villes sans arrondissements → Google viewport
         communeName = top10.city.nom;
-        mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+        try {
+          const viewport = await getGoogleViewport(communeName);
+          if (viewport) {
+            mapP.fitBounds(viewport);
+            google.maps.event.addListenerOnce(mapP, 'idle', () => {
+              mapP.setZoom(mapP.getZoom() + 1);
+            });
+          } else {
+            mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+          }
+        } catch(e) {
+          mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
+        }
       }
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
@@ -893,15 +923,6 @@ async function repositionParcelle(lat, lng) {
 
 function onGoogleMapsReady() {
   initMaps();
-
-  // Add click listeners for repositioning
-  mapA.addListener('click', (e) => {
-    repositionParcelle(e.latLng.lat(), e.latLng.lng());
-  });
-  mapC.addListener('click', (e) => {
-    repositionParcelle(e.latLng.lat(), e.latLng.lng());
-  });
-
   go();
 }
 </script>
