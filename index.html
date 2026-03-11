@@ -85,6 +85,28 @@
     border-top: 1px solid var(--border); min-height: 20px;
   }
 
+  .cadastre-list {
+    max-height: 120px; overflow-y: auto;
+    border-top: 1px solid var(--border);
+  }
+
+  .cadastre-list table {
+    width: 100%; border-collapse: collapse;
+    font-family: 'Ubuntu', sans-serif; font-size: 11px;
+  }
+
+  .cadastre-list th {
+    background: #f5f5f5; padding: 5px 12px; text-align: left;
+    font-weight: 600; color: var(--text); position: sticky; top: 0;
+  }
+
+  .cadastre-list td {
+    padding: 4px 12px; border-top: 1px solid #f0f0f0; color: var(--text);
+  }
+
+  .cadastre-list tr:hover td { background: #f8f6fd; }
+  .cadastre-list .sup { text-align: right; font-variant-numeric: tabular-nums; }
+
   .click-hint {
     padding: 6px 16px; font-size: 11px; color: var(--text-light);
     background: #fffbe6; border-top: 1px solid #f0e6b8;
@@ -153,6 +175,7 @@
     <div class="map-label">Plan CADASTRAL</div>
     <div class="map-container" id="mapCadastre"></div>
     <div class="cadastre-ref" id="cadastreRef"></div>
+    <div class="cadastre-list" id="cadastreList"></div>
     <div class="click-hint">Cliquez pour sélectionner/désélectionner des parcelles</div>
     <button class="capture-btn" onclick="capture('cadastre')">Capturer</button>
   </div>
@@ -227,7 +250,7 @@ function initMaps() {
     ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
   });
   mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
-    ...mapOpts, mapTypeId: 'roadmap', disableDoubleClickZoom: true,
+    ...mapOpts, mapTypeId: 'roadmap', disableDoubleClickZoom: true, maxZoom: 20,
     clickableIcons: false,
     styles: [
       // Hide EVERYTHING from Google base map — IGN tiles cover it all
@@ -678,8 +701,11 @@ async function go() {
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
 
-        // === PLAN CADASTRAL: fit to parcelle bounds ===
+        // === PLAN CADASTRAL: fit to parcelle bounds, cap zoom ===
         mapC.fitBounds(geojsonToBounds(parcelle.geometry));
+        google.maps.event.addListenerOnce(mapC, 'idle', () => {
+          if (mapC.getZoom() > 20) mapC.setZoom(20);
+        });
 
         // Store initial parcel ID — viewport loader will select it
         window._initialParcelId = `${section}-${numero}`;
@@ -909,6 +935,7 @@ function clearViewportParcels() {
   viewportParcels = [];
   selectedParcels = [];
   loadedParcelIds.clear();
+  document.getElementById('cadastreList').innerHTML = '';
 }
 
 // Load parcels in a small radius around a point (for initial load)
@@ -1044,12 +1071,15 @@ function toggleParcelle(polygon, feature) {
 }
 
 function updateCadastreRefDisplay() {
+  const listEl = document.getElementById('cadastreList');
+
   if (selectedParcels.length === 0) {
     document.getElementById('cadastreRef').textContent = 'Aucune parcelle sélectionnée';
+    listEl.innerHTML = '';
     return;
   }
 
-  // Group by section
+  // Summary line
   const sections = {};
   selectedParcels.forEach(sp => {
     const p = sp.feature.properties || {};
@@ -1057,13 +1087,45 @@ function updateCadastreRefDisplay() {
     if (!sections[sec]) sections[sec] = [];
     sections[sec].push(p.numero || '?');
   });
-
   const parts = Object.entries(sections).map(([sec, nums]) =>
     `Section ${sec} · n°${nums.join(', ')}`
   );
-
   const count = selectedParcels.length > 1 ? ` (${selectedParcels.length} parcelles)` : '';
   document.getElementById('cadastreRef').textContent = parts.join(' | ') + count;
+
+  // Parcels table
+  let totalSurface = 0;
+  let rows = '';
+  selectedParcels.forEach(sp => {
+    const p = sp.feature.properties || {};
+    const surface = p.contenance || 0; // m²
+    totalSurface += surface;
+    const surfaceDisplay = surface > 0
+      ? (surface >= 10000 ? (surface / 10000).toFixed(2) + ' ha' : surface.toLocaleString('fr-FR') + ' m²')
+      : '—';
+    rows += `<tr>
+      <td>${p.section || '?'}</td>
+      <td>${p.numero || '?'}</td>
+      <td class="sup">${surfaceDisplay}</td>
+    </tr>`;
+  });
+
+  // Total row if multiple
+  let totalRow = '';
+  if (selectedParcels.length > 1) {
+    const totalDisplay = totalSurface >= 10000
+      ? (totalSurface / 10000).toFixed(2) + ' ha'
+      : totalSurface.toLocaleString('fr-FR') + ' m²';
+    totalRow = `<tr style="font-weight:600;border-top:2px solid var(--border)">
+      <td colspan="2">Total</td>
+      <td class="sup">${totalDisplay}</td>
+    </tr>`;
+  }
+
+  listEl.innerHTML = `<table>
+    <thead><tr><th>Section</th><th>Parcelle</th><th class="sup">Superficie</th></tr></thead>
+    <tbody>${rows}${totalRow}</tbody>
+  </table>`;
 }
 
 function updateAerienneFromSelection() {
