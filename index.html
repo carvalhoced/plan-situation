@@ -53,7 +53,7 @@
   .search-bar button:disabled { opacity: 0.5; cursor: wait; }
 
   .maps-grid {
-    display: grid; grid-template-columns: repeat(3, 1fr);
+    display: grid; grid-template-columns: repeat(2, 1fr);
     gap: 20px; margin-bottom: 24px;
   }
 
@@ -78,6 +78,12 @@
   }
 
   .capture-btn:hover { background: var(--primary); color: white; }
+
+  .cadastre-ref {
+    padding: 8px 16px; font-size: 12px; font-weight: 600;
+    color: var(--primary); background: #f8f6fd;
+    border-top: 1px solid var(--border); min-height: 20px;
+  }
 
   .algo-panel {
     background: var(--surface); border: 1px solid var(--border);
@@ -135,25 +141,45 @@
     <div class="map-container" id="mapAerienne"></div>
     <button class="capture-btn" onclick="capture('aerienne')">Capturer</button>
   </div>
+  <div class="map-card">
+    <div class="map-label">Plan CADASTRAL</div>
+    <div class="map-container" id="mapCadastre"></div>
+    <div class="cadastre-ref" id="cadastreRef"></div>
+    <button class="capture-btn" onclick="capture('cadastre')">Capturer</button>
+  </div>
 </div>
 
 <div class="algo-panel" id="algoPanel" style="display:none">
   <h3>Détail de l'algorithme de cadrage</h3>
-  <div class="algo-details">
+  <div class="algo-details" style="grid-template-columns: repeat(4, 1fr)">
     <div class="algo-col" id="algoGeneral"><h4>Générale</h4><p>—</p></div>
     <div class="algo-col" id="algoParticuliere"><h4>Particulière</h4><p>—</p></div>
     <div class="algo-col" id="algoAerienne"><h4>Aérienne</h4><p>—</p></div>
+    <div class="algo-col" id="algoCadastre"><h4>Cadastre</h4><p>—</p></div>
   </div>
 </div>
 
 <script>
 const API_KEY = 'AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g';
 
-let mapG, mapP, mapA;
+let mapG, mapP, mapA, mapC;
 let markerG, markerP, markerA;
 
 // ===== PIN ICON =====
 const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
+
+// ===== IGN CADASTRE TILE OVERLAY =====
+function createCadastreOverlay() {
+  return new google.maps.ImageMapType({
+    getTileUrl: function(coord, zoom) {
+      return `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=PCI%20vecteur&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX=${zoom}&TILEROW=${coord.y}&TILECOL=${coord.x}`;
+    },
+    tileSize: new google.maps.Size(256, 256),
+    name: 'Cadastre',
+    opacity: 0.85,
+    maxZoom: 20,
+  });
+}
 
 // ===== INIT MAPS =====
 function initMaps() {
@@ -176,6 +202,11 @@ function initMaps() {
   mapA = new google.maps.Map(document.getElementById('mapAerienne'), {
     ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
   });
+  mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
+    ...mapOpts, mapTypeId: 'roadmap'
+  });
+  // Add cadastre tiles overlay
+  mapC.overlayMapTypes.push(createCadastreOverlay());
 }
 
 // ===== ADD MARKER =====
@@ -294,7 +325,7 @@ async function fetchParcelleCadastre(lat, lng) {
 }
 
 // ===== DRAW PARCELLE ON MAP =====
-function drawParcelleOnMap(map, feature) {
+function drawParcelleOnMap(map, feature, color = '#521DA5') {
   const geom = feature.geometry;
   const coords = geom.type === 'MultiPolygon'
     ? geom.coordinates[0][0]
@@ -304,13 +335,24 @@ function drawParcelleOnMap(map, feature) {
 
   new google.maps.Polygon({
     paths: path,
-    strokeColor: '#521DA5',
+    strokeColor: color,
     strokeOpacity: 0.85,
     strokeWeight: 2.5,
-    fillColor: '#521DA5',
+    fillColor: color,
     fillOpacity: 0.12,
     map: map,
   });
+}
+
+// ===== FETCH SECTION CADASTRALE (feuille) =====
+async function fetchSectionCadastre(codeInsee, section) {
+  const url = `https://apicarto.ign.fr/api/cadastre/feuille?code_insee=${codeInsee}&section=${section}&_limit=1`;
+  console.log('Section URL:', url);
+  const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data.features || !data.features.length) return null;
+  return data.features[0];
 }
 
 // ===== FETCH COMMUNE CONTOUR =====
@@ -517,31 +559,64 @@ async function go() {
       }
     } catch(e) { /* silent */ }
 
-    // ===== AÉRIENNE — Satellite, vue plate, cadré sur parcelle =====
+    // ===== AÉRIENNE + PLAN CADASTRAL =====
     mapA.setTilt(0);
+    let cadastreRef = '';
 
-    // ===== CADASTRE — Parcelle overlay on Aérienne =====
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
       if (parcelle) {
+        const props = parcelle.properties || {};
+        const section = props.section || '?';
+        const numero = props.numero || '?';
+        const codeInsee = props.code_insee || props.commune || '';
+        cadastreRef = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
+
+        // === AÉRIENNE: parcelle contour + fit ===
         drawParcelleOnMap(mapA, parcelle);
-        // Fit to parcelle bounds with padding so contour is fully visible
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
-        console.log('Parcelle cadastrale:', parcelle.properties);
+
+        // === PLAN CADASTRAL: center on parcelle, zoom 19, with IGN tiles ===
+        drawParcelleOnMap(mapC, parcelle, '#E5007D');
+        mapC.fitBounds(parcelleBounds);
+        // Zoom out one level for context on cadastre
+        google.maps.event.addListenerOnce(mapC, 'idle', () => {
+          const z = mapC.getZoom();
+          if (z > 18) mapC.setZoom(z - 1);
+        });
+
+        // Fetch section contour
+        if (codeInsee && section) {
+          try {
+            const sectionData = await fetchSectionCadastre(codeInsee, section);
+            if (sectionData) {
+              drawParcelleOnMap(mapC, sectionData, '#521DA5');
+              console.log('Section cadastrale:', sectionData.properties);
+            }
+          } catch(e) { console.warn('Section fetch failed:', e); }
+        }
+
+        // Display reference
+        document.getElementById('cadastreRef').textContent = cadastreRef;
+        console.log('Parcelle cadastrale:', props);
       } else {
-        // No parcelle found: fallback center on bien
         mapA.setCenter({ lat: bien.lat, lng: bien.lng });
         mapA.setZoom(19);
+        mapC.setCenter({ lat: bien.lat, lng: bien.lng });
+        mapC.setZoom(18);
+        document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée';
       }
     } catch(e) {
       console.warn('Cadastre failed:', e);
       mapA.setCenter({ lat: bien.lat, lng: bien.lng });
       mapA.setZoom(19);
+      mapC.setCenter({ lat: bien.lat, lng: bien.lng });
+      mapC.setZoom(18);
     }
 
     // ===== ALGO DETAILS =====
-    showAlgoDetails(bien, gCities, communeName, top10, modeLabel);
+    showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef);
     setStatus(address + ' — mode: ' + modeLabel, '');
 
   } catch(err) {
@@ -610,7 +685,7 @@ function getGoogleViewport(placeName) {
 // Store last bien for capture
 let lastBien = null;
 
-function showAlgoDetails(bien, gCities, communeName, top10, modeLabel) {
+function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef) {
   lastBien = bien;
   document.getElementById('algoPanel').style.display = 'block';
 
@@ -627,7 +702,7 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel) {
       <p>Bbox bien ↔ ${top10.city.nom} (${top10.city.dist.toFixed(0)}km)</p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
       <p>Commune: <span class="value">${communeName || '?'}</span></p>
-      <p>Contour vs rayon urbain</p>`;
+      <p>Google Geocoder viewport</p>`;
 
   } else {
     const citiesList = gCities.slice(0, 4).map(c =>
@@ -638,13 +713,17 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel) {
       <p style="font-size:11px;color:#888;margin-top:4px">${citiesList}</p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
       <p>Commune: <span class="value">${communeName || '?'}</span></p>
-      <p>Contour vs rayon urbain</p>`;
+      <p>Google Geocoder viewport</p>`;
   }
 
   document.getElementById('algoAerienne').innerHTML = `<h4>Aérienne</h4>
-    <p>Google Maps <span class="value">satellite</span> · zoom <span class="value">19</span> · vue plate</p>
-    <p>Parcelle cadastrale (API Carto IGN)</p>
+    <p>Satellite · vue plate · cadré sur parcelle</p>
     <p>${bien.lat.toFixed(5)}, ${bien.lng.toFixed(5)}</p>`;
+
+  document.getElementById('algoCadastre').innerHTML = `<h4>Cadastre</h4>
+    <p>Tuiles IGN Parcellaire Express</p>
+    <p><span class="value">${cadastreRef || '—'}</span></p>
+    <p>Contour section + parcelle (API Carto)</p>`;
 }
 
 // ===== CAPTURE via Static Maps API =====
@@ -652,6 +731,7 @@ async function capture(type) {
   let map, mapType, filename;
   if (type === 'general') { map = mapG; mapType = 'roadmap'; filename = 'situation-generale'; }
   else if (type === 'particuliere') { map = mapP; mapType = 'roadmap'; filename = 'situation-particuliere'; }
+  else if (type === 'cadastre') { map = mapC; mapType = 'roadmap'; filename = 'plan-cadastral'; }
   else { map = mapA; mapType = 'satellite'; filename = 'vue-aerienne'; }
 
   if (!map || !lastBien) return;
