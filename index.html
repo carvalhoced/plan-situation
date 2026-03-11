@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v7</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v8</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -343,6 +343,31 @@ function boundsFromRadius(lat, lng, radiusKm) {
   bounds.extend({ lat: lat - degLat, lng: lng - degLng });
   bounds.extend({ lat: lat + degLat, lng: lng + degLng });
   return bounds;
+}
+
+// ===== ENSURE PIN HAS MARGIN FROM EDGES =====
+// If pin is within 15% of any edge, extend bounds so pin has 15% margin
+function ensurePinMargin(bounds, lat, lng, margin = 0.15) {
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const h = ne.lat() - sw.lat();
+  const w = ne.lng() - sw.lng();
+  const mh = h * margin; // margin in lat degrees
+  const mw = w * margin; // margin in lng degrees
+
+  let newS = sw.lat(), newN = ne.lat();
+  let newW = sw.lng(), newE = ne.lng();
+
+  // Check each edge
+  if (lat - sw.lat() < mh) newS = lat - mh;       // pin too close to south
+  if (ne.lat() - lat < mh) newN = lat + mh;       // pin too close to north
+  if (lng - sw.lng() < mw) newW = lng - mw;       // pin too close to west
+  if (ne.lng() - lng < mw) newE = lng + mw;       // pin too close to east
+
+  return new google.maps.LatLngBounds(
+    { lat: newS, lng: newW },
+    { lat: newN, lng: newE }
+  );
 }
 
 // ===== DRAW COMMUNE CONTOUR (dark gray, visible) =====
@@ -568,12 +593,12 @@ async function go() {
           const cityBounds = geojsonToBounds(cityCommune.contour);
           padBounds(cityBounds, 0.08);
           cityBounds.extend({ lat: bien.lat, lng: bien.lng });
-          mapG.fitBounds(cityBounds);
+          mapG.fitBounds(ensurePinMargin(cityBounds, bien.lat, bien.lng));
         } else {
-          mapG.fitBounds(boundsFromRadius(top10.city.lat, top10.city.lng, 10));
+          mapG.fitBounds(ensurePinMargin(boundsFromRadius(top10.city.lat, top10.city.lng, 10), bien.lat, bien.lng));
         }
       } catch(e) {
-        mapG.fitBounds(boundsFromRadius(top10.city.lat, top10.city.lng, 10));
+        mapG.fitBounds(ensurePinMargin(boundsFromRadius(top10.city.lat, top10.city.lng, 10), bien.lat, bien.lng));
       }
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
@@ -636,7 +661,7 @@ async function go() {
       gBounds.extend({ lat: bien.lat, lng: bien.lng });
       gBounds.extend({ lat: top10.city.lat, lng: top10.city.lng });
       padBounds(gBounds, 0.15);
-      mapG.fitBounds(gBounds);
+      mapG.fitBounds(ensurePinMargin(gBounds, bien.lat, bien.lng));
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
       // PARTICULIÈRE → standard commune logic
@@ -654,7 +679,7 @@ async function go() {
           { lat: 41.38, lng: 8.57 },  // SW
           { lat: 43.03, lng: 9.57 }   // NE
         );
-        mapG.fitBounds(corseBounds);
+        mapG.fitBounds(ensurePinMargin(corseBounds, bien.lat, bien.lng));
         google.maps.event.addListenerOnce(mapG, 'idle', () => {
           mapG.setZoom(mapG.getZoom() + 1);
         });
@@ -664,9 +689,9 @@ async function go() {
         if (gCities.length > 0) {
           const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
           padBounds(gBounds, 0.08);
-          mapG.fitBounds(gBounds);
+          mapG.fitBounds(ensurePinMargin(gBounds, bien.lat, bien.lng));
         } else {
-          mapG.fitBounds(boundsFromRadius(bien.lat, bien.lng, 75));
+          mapG.fitBounds(ensurePinMargin(boundsFromRadius(bien.lat, bien.lng, 75), bien.lat, bien.lng));
         }
       }
       markerG = addMarker(mapG, bien.lat, bien.lng);
