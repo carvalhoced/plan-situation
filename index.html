@@ -514,10 +514,27 @@ function findCitiesForGenerale(lat, lng) {
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
   })).filter(c => c.dist > 5);
 
-  return withDist
+  // 2 nearest metropoles > 100k
+  const nearest2 = withDist
     .filter(c => c.pop >= 100000)
     .sort((a,b) => a.dist - b.dist)
     .slice(0, 2);
+
+  // Also include nearest top-10 city if within 150km and not already in the list
+  const top10WithDist = TOP10_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5 && c.dist <= 150)
+    .sort((a,b) => a.dist - b.dist);
+
+  if (top10WithDist.length > 0) {
+    const nearestTop10 = top10WithDist[0];
+    const alreadyIncluded = nearest2.some(c => c.nom === nearestTop10.nom);
+    if (!alreadyIncluded) {
+      nearest2.push(nearestTop10);
+    }
+  }
+
+  return nearest2;
 }
 
 function citiesBounds(lat, lng, cities) {
