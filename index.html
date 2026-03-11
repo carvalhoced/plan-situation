@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v9</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v10</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -348,7 +348,8 @@ function boundsFromRadius(lat, lng, radiusKm) {
 // ===== ENSURE PIN HAS MARGIN FROM EDGES (post-render) =====
 // Call AFTER fitBounds + any zoom changes. Checks actual rendered bounds and pans if pin is too close to edge.
 function ensurePinVisible(map, lat, lng, margin = 0.15) {
-  google.maps.event.addListenerOnce(map, 'idle', () => {
+  // Wait 800ms for fitBounds + zoom+1 to fully settle before checking
+  setTimeout(() => {
     const bounds = map.getBounds();
     if (!bounds) return;
 
@@ -361,17 +362,17 @@ function ensurePinVisible(map, lat, lng, margin = 0.15) {
 
     let panLat = 0, panLng = 0;
 
-    if (lat - sw.lat() < mh) panLat = -(mh - (lat - sw.lat()));  // pin too close to south → pan south
-    if (ne.lat() - lat < mh) panLat = (mh - (ne.lat() - lat));   // pin too close to north → pan north
-    if (lng - sw.lng() < mw) panLng = -(mw - (lng - sw.lng()));  // pin too close to west → pan west
-    if (ne.lng() - lng < mw) panLng = (mw - (ne.lng() - lng));   // pin too close to east → pan east
+    if (lat - sw.lat() < mh) panLat = -(mh - (lat - sw.lat()));
+    if (ne.lat() - lat < mh) panLat = (mh - (ne.lat() - lat));
+    if (lng - sw.lng() < mw) panLng = -(mw - (lng - sw.lng()));
+    if (ne.lng() - lng < mw) panLng = (mw - (ne.lng() - lng));
 
     if (panLat !== 0 || panLng !== 0) {
       const center = map.getCenter();
       map.panTo({ lat: center.lat() + panLat, lng: center.lng() + panLng });
-      console.log(`Pin margin fix: panLat ${panLat.toFixed(4)} panLng ${panLng.toFixed(4)}`);
+      console.log('Pin margin fix: panLat ' + panLat.toFixed(4) + ' panLng ' + panLng.toFixed(4));
     }
-  });
+  }, 800);
 }
 
 // ===== DRAW COMMUNE CONTOUR (dark gray, visible) =====
@@ -689,6 +690,9 @@ async function go() {
           { lat: 43.03, lng: 9.57 }   // NE
         );
         mapG.fitBounds(corseBounds);
+        google.maps.event.addListenerOnce(mapG, 'idle', () => {
+          mapG.setZoom(mapG.getZoom() + 1);
+        });
       } else {
         // GÉNÉRALE — nearest top-10 within 150km, or 2 nearest métropoles >100k
         gCities = findCitiesForGenerale(bien.lat, bien.lng);
