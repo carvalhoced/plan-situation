@@ -375,6 +375,17 @@ async function fetchSectionCadastre(codeInsee, section) {
   return data.features[0];
 }
 
+// ===== FETCH ARRONDISSEMENT CONTOUR =====
+async function fetchArrondissementContour(lat, lng) {
+  const url = `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=nom,contour,population,code&type=arrondissement-municipal&limit=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  console.log('Arrondissement API response:', data);
+  if (!data.length || !data[0].contour) return null;
+  return data[0];
+}
+
 // ===== FETCH COMMUNE CONTOUR =====
 async function fetchCommuneContour(lat, lng) {
   const url = `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=nom,contour,population,surface&limit=1`;
@@ -533,7 +544,7 @@ async function go() {
       const citiesWithArrondissements = ['Paris', 'Marseille', 'Lyon'];
       if (citiesWithArrondissements.includes(top10.city.nom)) {
         try {
-          const arrData = await fetchCommuneContour(bien.lat, bien.lng);
+          const arrData = await fetchArrondissementContour(bien.lat, bien.lng);
           if (arrData && arrData.nom) {
             communeName = arrData.nom; // ex: "Paris 11e Arrondissement"
             // Use Google viewport for zoom (same as standard communes)
