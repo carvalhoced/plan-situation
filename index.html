@@ -546,20 +546,15 @@ async function go() {
         try {
           const arrData = await fetchArrondissementContour(bien.lat, bien.lng);
           if (arrData && arrData.nom) {
-            communeName = arrData.nom; // ex: "Paris 11e Arrondissement"
-            // Use Google viewport for zoom (same as standard communes)
-            const viewport = await getGoogleViewport(communeName);
-            if (viewport) {
-              mapP.fitBounds(viewport);
-              google.maps.event.addListenerOnce(mapP, 'idle', () => {
-                mapP.setZoom(mapP.getZoom() + 1);
-              });
+            communeName = arrData.nom;
+            if (arrData.contour) {
+              // Zoom directly on arrondissement contour
+              const arrBounds = geojsonToBounds(arrData.contour);
+              mapP.fitBounds(arrBounds);
+              // Draw arrondissement contour
+              drawCommuneContour(mapP, arrData.contour);
             } else {
               mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
-            }
-            // Draw arrondissement contour
-            if (arrData.contour) {
-              drawCommuneContour(mapP, arrData.contour);
             }
             console.log('Arrondissement:', communeName);
           } else {
