@@ -91,7 +91,7 @@
     text-align: center;
   }
 
-  #mapCadastre { cursor: crosshair; }
+  #mapCadastre { cursor: pointer; }
 
   .algo-panel {
     background: var(--surface); border: 1px solid var(--border);
@@ -153,7 +153,7 @@
     <div class="map-label">Plan CADASTRAL</div>
     <div class="map-container" id="mapCadastre"></div>
     <div class="cadastre-ref" id="cadastreRef"></div>
-    <div class="click-hint">Cliquez sur la parcelle pour la sélectionner</div>
+    <div class="click-hint">Survolez pour identifier · Cliquez pour sélectionner</div>
     <button class="capture-btn" onclick="capture('cadastre')">Capturer</button>
   </div>
 </div>
@@ -246,9 +246,14 @@ function initMaps() {
   // Add cadastre tiles on top
   mapC.overlayMapTypes.push(createCadastreOverlay());
 
-  // Click-to-reposition on Cadastre only
-  mapC.addListener('click', (e) => {
-    repositionParcelle(e.latLng.lat(), e.latLng.lng());
+  // Load all parcels when map stops moving
+  mapC.addListener('idle', () => {
+    if (mapC.getZoom() >= 18) {
+      loadParcellesInViewport();
+    } else {
+      // Clear parcels if zoomed out too far
+      clearViewportParcels();
+    }
   });
 }
 
@@ -677,6 +682,7 @@ async function go() {
     // Clear any previous polygons
     clearPolygons(currentPolygonsA);
     clearPolygons(currentPolygonsC);
+    clearViewportParcels();
 
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
@@ -692,13 +698,14 @@ async function go() {
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
 
-        // === PLAN CADASTRAL ===
-        drawTrackedPolygon(mapC, parcelle, '#E5007D', currentPolygonsC);
-        mapC.fitBounds(parcelleBounds);
-        google.maps.event.addListenerOnce(mapC, 'idle', () => {
-          const z = mapC.getZoom();
-          if (z > 18) mapC.setZoom(z - 1);
-        });
+        // === PLAN CADASTRAL: center on parcelle, zoom 18 ===
+        // Parcels will be loaded interactively by the viewport listener
+        mapC.setCenter(parcelleBounds.getCenter());
+        mapC.setZoom(19);
+
+        // Store initial parcel ID so viewport loader can pre-select it
+        window._initialParcelId = `${section}-${numero}`;
+        window._initialParcelFeature = parcelle;
 
         // Fetch section contour
         if (codeInsee && section) {
@@ -706,9 +713,8 @@ async function go() {
             const sectionData = await fetchSectionCadastre(codeInsee, section);
             if (sectionData) {
               drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
-              console.log('Section cadastrale:', sectionData.properties);
             }
-          } catch(e) { console.warn('Section fetch failed:', e); }
+          } catch(e) { /* silent */ }
         }
 
         document.getElementById('cadastreRef').textContent = cadastreRef;
@@ -717,7 +723,7 @@ async function go() {
         mapA.setCenter({ lat: bien.lat, lng: bien.lng });
         mapA.setZoom(19);
         mapC.setCenter({ lat: bien.lat, lng: bien.lng });
-        mapC.setZoom(18);
+        mapC.setZoom(19);
         document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée';
       }
     } catch(e) {
@@ -725,7 +731,7 @@ async function go() {
       mapA.setCenter({ lat: bien.lat, lng: bien.lng });
       mapA.setZoom(19);
       mapC.setCenter({ lat: bien.lat, lng: bien.lng });
-      mapC.setZoom(18);
+      mapC.setZoom(19);
     }
 
     // ===== ALGO DETAILS =====
@@ -886,7 +892,7 @@ document.getElementById('addressInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') go();
 });
 
-// ===== CLICK-TO-REPOSITION =====
+// ===== INTERACTIVE PARCELS SYSTEM =====
 
 function clearPolygons(arr) {
   arr.forEach(p => p.setMap(null));
@@ -912,55 +918,168 @@ function drawTrackedPolygon(map, feature, color, trackArr) {
   trackArr.push(poly);
 }
 
-async function repositionParcelle(lat, lng) {
-  if (lastBien) {
-    lastBien.lat = lat;
-    lastBien.lng = lng;
-  }
+// Viewport parcels
+let viewportParcels = []; // { polygon, feature } objects
+let selectedParcelPoly = null;
+let isLoadingParcels = false;
 
-  // Loading feedback
-  document.getElementById('cadastreRef').textContent = 'Recherche de la parcelle…';
+function clearViewportParcels() {
+  viewportParcels.forEach(vp => vp.polygon.setMap(null));
+  viewportParcels = [];
+}
 
-  // Clear old polygons
-  clearPolygons(currentPolygonsA);
-  clearPolygons(currentPolygonsC);
+async function loadParcellesInViewport() {
+  if (isLoadingParcels) return;
+  isLoadingParcels = true;
+
+  const bounds = mapC.getBounds();
+  if (!bounds) { isLoadingParcels = false; return; }
+
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+
+  // Build a polygon from viewport bounds
+  const geom = JSON.stringify({
+    type: 'Polygon',
+    coordinates: [[[sw.lng(), sw.lat()], [ne.lng(), sw.lat()], [ne.lng(), ne.lat()], [sw.lng(), ne.lat()], [sw.lng(), sw.lat()]]]
+  });
 
   try {
-    const parcelle = await fetchParcelleCadastre(lat, lng);
-    if (parcelle) {
-      const props = parcelle.properties || {};
-      const section = props.section || '?';
-      const numero = props.numero || '?';
-      const codeInsee = props.code_insee || props.commune || '';
-      const ref = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
+    const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=200`;
+    const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+    if (!res.ok) { isLoadingParcels = false; return; }
+    const data = await res.json();
+    if (!data.features) { isLoadingParcels = false; return; }
 
-      // Draw on Aérienne + zoom
-      drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
-      const parcelleBounds = geojsonToBounds(parcelle.geometry);
-      mapA.fitBounds(parcelleBounds);
+    // Clear old viewport parcels (but keep selected)
+    const selectedId = selectedParcelPoly ? selectedParcelPoly._parcelId : null;
+    clearViewportParcels();
+    selectedParcelPoly = null;
 
-      // Draw on Cadastre (highlight only, don't zoom — user is browsing)
-      drawTrackedPolygon(mapC, parcelle, '#E5007D', currentPolygonsC);
+    console.log(`Loaded ${data.features.length} parcelles in viewport`);
 
-      // Section contour
-      if (codeInsee && section) {
-        try {
-          const sectionData = await fetchSectionCadastre(codeInsee, section);
-          if (sectionData) {
-            drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
-          }
-        } catch(e) { /* silent */ }
+    data.features.forEach(feature => {
+      const geom = feature.geometry;
+      const coords = geom.type === 'MultiPolygon'
+        ? geom.coordinates[0][0]
+        : geom.coordinates[0];
+      const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+      const props = feature.properties || {};
+      const parcelId = `${props.section}-${props.numero}`;
+
+      // Is this the previously selected parcel?
+      const isSelected = (parcelId === selectedId);
+
+      const polygon = new google.maps.Polygon({
+        paths: path,
+        strokeColor: isSelected ? '#E5007D' : 'transparent',
+        strokeOpacity: isSelected ? 0.9 : 0,
+        strokeWeight: isSelected ? 3 : 0,
+        fillColor: isSelected ? '#E5007D' : '#521DA5',
+        fillOpacity: isSelected ? 0.2 : 0,
+        map: mapC,
+        zIndex: isSelected ? 10 : 1,
+      });
+
+      polygon._parcelId = parcelId;
+      polygon._feature = feature;
+
+      if (isSelected) selectedParcelPoly = polygon;
+
+      // Hover: highlight
+      polygon.addListener('mouseover', () => {
+        if (polygon !== selectedParcelPoly) {
+          polygon.setOptions({
+            fillOpacity: 0.15,
+            fillColor: '#521DA5',
+            strokeColor: '#521DA5',
+            strokeOpacity: 0.6,
+            strokeWeight: 2,
+          });
+        }
+      });
+
+      polygon.addListener('mouseout', () => {
+        if (polygon !== selectedParcelPoly) {
+          polygon.setOptions({
+            fillOpacity: 0,
+            strokeOpacity: 0,
+            strokeWeight: 0,
+          });
+        }
+      });
+
+      // Click: select
+      polygon.addListener('click', () => {
+        selectParcelle(polygon, feature);
+      });
+
+      viewportParcels.push({ polygon, feature });
+
+      // Pre-select if this is the initial parcel
+      if (window._initialParcelId && parcelId === window._initialParcelId) {
+        selectedParcelPoly = polygon;
+        polygon.setOptions({
+          strokeColor: '#E5007D', strokeOpacity: 0.9, strokeWeight: 3,
+          fillColor: '#E5007D', fillOpacity: 0.2, zIndex: 10,
+        });
+        window._initialParcelId = null; // only once
       }
+    });
 
-      document.getElementById('cadastreRef').textContent = ref;
-      console.log('Sélectionné:', ref);
-    } else {
-      document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée à cet emplacement';
-    }
   } catch(e) {
-    console.warn('Reposition failed:', e);
-    document.getElementById('cadastreRef').textContent = 'Erreur de recherche cadastrale';
+    console.warn('Viewport parcels load failed:', e);
   }
+
+  isLoadingParcels = false;
+}
+
+async function selectParcelle(polygon, feature) {
+  // Deselect previous
+  if (selectedParcelPoly && selectedParcelPoly !== polygon) {
+    selectedParcelPoly.setOptions({
+      strokeColor: 'transparent', strokeOpacity: 0, strokeWeight: 0,
+      fillOpacity: 0,
+    });
+  }
+
+  // Select new
+  selectedParcelPoly = polygon;
+  polygon.setOptions({
+    strokeColor: '#E5007D',
+    strokeOpacity: 0.9,
+    strokeWeight: 3,
+    fillColor: '#E5007D',
+    fillOpacity: 0.2,
+    zIndex: 10,
+  });
+
+  const props = feature.properties || {};
+  const section = props.section || '?';
+  const numero = props.numero || '?';
+  const codeInsee = props.code_insee || props.commune || '';
+  const ref = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
+  document.getElementById('cadastreRef').textContent = ref;
+
+  // Update aérienne
+  clearPolygons(currentPolygonsA);
+  drawTrackedPolygon(mapA, feature, '#521DA5', currentPolygonsA);
+  const parcelleBounds = geojsonToBounds(feature.geometry);
+  mapA.fitBounds(parcelleBounds);
+
+  // Update section on cadastre
+  clearPolygons(currentPolygonsC);
+  if (codeInsee && section) {
+    try {
+      const sectionData = await fetchSectionCadastre(codeInsee, section);
+      if (sectionData) {
+        drawTrackedPolygon(mapC, sectionData, '#521DA5', currentPolygonsC);
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  console.log('Sélectionné:', ref);
+}
 }
 
 function onGoogleMapsReady() {
