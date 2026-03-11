@@ -678,9 +678,8 @@ async function go() {
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
 
-        // === PLAN CADASTRAL: center on parcelle ===
-        mapC.setCenter(parcelleBounds.getCenter());
-        mapC.setZoom(19);
+        // === PLAN CADASTRAL: fit to parcelle bounds ===
+        mapC.fitBounds(geojsonToBounds(parcelle.geometry));
 
         // Store initial parcel ID — viewport loader will select it
         window._initialParcelId = `${section}-${numero}`;
