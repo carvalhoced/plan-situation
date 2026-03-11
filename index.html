@@ -228,10 +228,17 @@ function initMaps() {
   });
   mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
     ...mapOpts, mapTypeId: 'roadmap', disableDoubleClickZoom: true,
+    clickableIcons: false,
     styles: [
-      // Simplify base map for cadastre: remove POI, transit
+      // Hide EVERYTHING from Google base map — IGN tiles cover it all
+      { elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+      { elementType: 'labels', stylers: [{ visibility: 'off' }] },
+      { featureType: 'road', stylers: [{ visibility: 'off' }] },
       { featureType: 'poi', stylers: [{ visibility: 'off' }] },
       { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+      { featureType: 'water', stylers: [{ visibility: 'off' }] },
+      { featureType: 'administrative', stylers: [{ visibility: 'off' }] },
+      { featureType: 'landscape', stylers: [{ color: '#ffffff' }] },
     ]
   });
   // Add IGN Plan as base layer
@@ -341,23 +348,39 @@ function drawCommuneContour(map, geojson) {
 
 // ===== FETCH PARCELLE CADASTRALE (IGN API Carto) =====
 async function fetchParcelleCadastre(lat, lng) {
-  // API requires a Polygon geometry — create a tiny 10m square around the point
-  const d = 0.00005; // ~5m in degrees
+  // Search in a ~60m square around the point to get nearby parcels
+  const d = 0.0003;
   const geom = JSON.stringify({
     type: 'Polygon',
     coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
   });
-  const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=1`;
-  console.log('Cadastre URL:', url);
+  const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=10`;
   const res = await fetch(url, { headers: { 'accept': 'application/json' } });
   if (!res.ok) {
     console.warn('Cadastre HTTP error:', res.status, await res.text());
     return null;
   }
   const data = await res.json();
-  console.log('Cadastre response:', data);
   if (!data.features || !data.features.length) return null;
-  return data.features[0];
+
+  // Find the parcel that contains the click point (or closest centroid)
+  let best = data.features[0];
+  let bestDist = Infinity;
+  for (const f of data.features) {
+    const bounds = new google.maps.LatLngBounds();
+    const coords = f.geometry.type === 'MultiPolygon'
+      ? f.geometry.coordinates[0][0]
+      : f.geometry.coordinates[0];
+    coords.forEach(c => bounds.extend({ lat: c[1], lng: c[0] }));
+    const center = bounds.getCenter();
+    const dist = Math.sqrt((center.lat() - lat)**2 + (center.lng() - lng)**2);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = f;
+    }
+  }
+  console.log(`Cadastre: ${data.features.length} parcelles trouvées, sélectionné la plus proche`);
+  return best;
 }
 
 // ===== DRAW PARCELLE ON MAP =====
@@ -890,11 +913,13 @@ function drawTrackedPolygon(map, feature, color, trackArr) {
 }
 
 async function repositionParcelle(lat, lng) {
-  // Update stored position
   if (lastBien) {
     lastBien.lat = lat;
     lastBien.lng = lng;
   }
+
+  // Loading feedback
+  document.getElementById('cadastreRef').textContent = 'Recherche de la parcelle…';
 
   // Clear old polygons
   clearPolygons(currentPolygonsA);
@@ -909,18 +934,13 @@ async function repositionParcelle(lat, lng) {
       const codeInsee = props.code_insee || props.commune || '';
       const ref = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
 
-      // Draw on Aérienne
+      // Draw on Aérienne + zoom
       drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
       const parcelleBounds = geojsonToBounds(parcelle.geometry);
       mapA.fitBounds(parcelleBounds);
 
-      // Draw on Cadastre
+      // Draw on Cadastre (highlight only, don't zoom — user is browsing)
       drawTrackedPolygon(mapC, parcelle, '#E5007D', currentPolygonsC);
-      mapC.fitBounds(parcelleBounds);
-      google.maps.event.addListenerOnce(mapC, 'idle', () => {
-        const z = mapC.getZoom();
-        if (z > 18) mapC.setZoom(z - 1);
-      });
 
       // Section contour
       if (codeInsee && section) {
@@ -933,7 +953,7 @@ async function repositionParcelle(lat, lng) {
       }
 
       document.getElementById('cadastreRef').textContent = ref;
-      console.log('Repositionné:', ref);
+      console.log('Sélectionné:', ref);
     } else {
       document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée à cet emplacement';
     }
