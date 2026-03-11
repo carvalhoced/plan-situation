@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage</h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v7</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -603,15 +603,20 @@ async function go() {
           mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       } else {
-        // Autres grandes villes sans arrondissements → Google viewport
+        // Autres grandes villes sans arrondissements → Google viewport with validation
         communeName = top10.city.nom;
         try {
           const viewport = await getGoogleViewport(communeName);
-          if (viewport) {
+          const communeData = await fetchCommuneContour(bien.lat, bien.lng);
+          const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
+
+          if (viewport && (!contourBounds || !isViewportTooWide(viewport, contourBounds))) {
             mapP.fitBounds(viewport);
             google.maps.event.addListenerOnce(mapP, 'idle', () => {
               mapP.setZoom(mapP.getZoom() + 1);
             });
+          } else if (contourBounds) {
+            mapP.fitBounds(contourBounds);
           } else {
             mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
           }
@@ -650,6 +655,9 @@ async function go() {
           { lat: 43.03, lng: 9.57 }   // NE
         );
         mapG.fitBounds(corseBounds);
+        google.maps.event.addListenerOnce(mapG, 'idle', () => {
+          mapG.setZoom(mapG.getZoom() + 1);
+        });
       } else {
         // GÉNÉRALE — nearest top-10 within 150km, or 2 nearest métropoles >100k
         gCities = findCitiesForGenerale(bien.lat, bien.lng);
@@ -745,30 +753,48 @@ async function go() {
 async function doParticuliereStandard(bien) {
   let communeName = '?';
   try {
-    // 1. Get commune name from geo.api.gouv.fr
+    // 1. Get commune name + contour from geo.api.gouv.fr
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
     if (communeData) {
       communeName = communeData.nom;
     }
 
-    // 2. Use Google Geocoder viewport (= inhabited area framing, not admin boundary)
+    // 2. Try Google Geocoder viewport
     if (communeName !== '?') {
       const viewport = await getGoogleViewport(communeName);
-      if (viewport) {
+      const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
+
+      if (viewport && contourBounds && !isViewportTooWide(viewport, contourBounds)) {
+        // Viewport is reasonable → use it
         mapP.fitBounds(viewport);
-        // Zoom in one extra level for tighter framing
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
           mapP.setZoom(mapP.getZoom() + 1);
         });
-        console.log(communeName + ': Google viewport + zoom +1');
+        console.log(communeName + ': Google viewport OK (within 5km of contour)');
+        return communeName;
+      }
+
+      if (viewport && !contourBounds) {
+        // No contour to compare → use viewport anyway
+        mapP.fitBounds(viewport);
+        google.maps.event.addListenerOnce(mapP, 'idle', () => {
+          mapP.setZoom(mapP.getZoom() + 1);
+        });
+        console.log(communeName + ': Google viewport (no contour to validate)');
+        return communeName;
+      }
+
+      // Viewport too wide → fallback to contour
+      if (contourBounds) {
+        mapP.fitBounds(contourBounds);
+        console.log(communeName + ': viewport trop large, fallback contour');
         return communeName;
       }
     }
 
-    // 3. Fallback: contour geo.api.gouv.fr
+    // 3. Last fallback: radius
     if (communeData && communeData.contour) {
-      const contourBounds = geojsonToBounds(communeData.contour);
-      mapP.fitBounds(contourBounds);
+      mapP.fitBounds(geojsonToBounds(communeData.contour));
       console.log(communeName + ': fallback contour');
     } else {
       mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
@@ -778,6 +804,29 @@ async function doParticuliereStandard(bien) {
     mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
   }
   return communeName;
+}
+
+// Check if Google viewport extends more than 5km beyond commune contour on any edge
+function isViewportTooWide(viewport, contourBounds) {
+  const MAX_GAP_KM = 5;
+  const vNE = viewport.getNorthEast();
+  const vSW = viewport.getSouthWest();
+  const cNE = contourBounds.getNorthEast();
+  const cSW = contourBounds.getSouthWest();
+
+  // Check each edge: viewport edge vs contour edge
+  const gapNorth = haversine(cNE.lat(), 0, vNE.lat(), 0); // north edge
+  const gapSouth = haversine(cSW.lat(), 0, vSW.lat(), 0); // south edge
+  const gapEast  = haversine(0, cNE.lng(), 0, vNE.lng()); // east edge
+  const gapWest  = haversine(0, cSW.lng(), 0, vSW.lng()); // west edge
+
+  const tooWide = gapNorth > MAX_GAP_KM || gapSouth > MAX_GAP_KM ||
+                  gapEast > MAX_GAP_KM || gapWest > MAX_GAP_KM;
+
+  if (tooWide) {
+    console.log(`Viewport trop large: N+${gapNorth.toFixed(1)}km S+${gapSouth.toFixed(1)}km E+${gapEast.toFixed(1)}km W+${gapWest.toFixed(1)}km`);
+  }
+  return tooWide;
 }
 
 // Google Geocoder: get viewport bounds for a place name
