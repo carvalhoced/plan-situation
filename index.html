@@ -211,7 +211,7 @@ function createCadastreOverlay() {
     tileSize: new google.maps.Size(256, 256),
     name: 'Cadastre',
     opacity: 0.85,
-    maxZoom: 20,
+    maxZoom: 19,
   });
 }
 
@@ -243,13 +243,13 @@ function initMaps() {
     },
     tileSize: new google.maps.Size(256, 256),
     name: 'IGN',
-    maxZoom: 20,
+    maxZoom: 19,
   });
   ignBase.name = 'IGN';
   ignBase.alt = 'Plan IGN';
 
   mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
-    ...mapOpts, disableDoubleClickZoom: true, maxZoom: 20,
+    ...mapOpts, disableDoubleClickZoom: true, maxZoom: 19,
     clickableIcons: false,
     mapTypeControlOptions: { mapTypeIds: ['IGN'] },
   });
@@ -693,7 +693,7 @@ async function go() {
         // === PLAN CADASTRAL: fit to parcelle bounds, cap zoom ===
         mapC.fitBounds(geojsonToBounds(parcelle.geometry));
         google.maps.event.addListenerOnce(mapC, 'idle', () => {
-          if (mapC.getZoom() > 20) mapC.setZoom(20);
+          if (mapC.getZoom() > 19) mapC.setZoom(19);
         });
 
         // Store initial parcel ID — viewport loader will select it
