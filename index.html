@@ -678,14 +678,29 @@ async function go() {
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
 
-        // === PLAN CADASTRAL: center on parcelle, zoom 18 ===
-        // Parcels will be loaded interactively by the viewport listener
+        // === PLAN CADASTRAL: center on parcelle, draw it immediately ===
         mapC.setCenter(parcelleBounds.getCenter());
         mapC.setZoom(19);
 
-        // Store initial parcel ID so viewport loader can pre-select it
+        // Draw the initial parcel directly (don't wait for viewport loader)
+        const initCoords = parcelle.geometry.type === 'MultiPolygon'
+          ? parcelle.geometry.coordinates[0][0]
+          : parcelle.geometry.coordinates[0];
+        const initPath = initCoords.map(c => ({ lat: c[1], lng: c[0] }));
+        const initPoly = new google.maps.Polygon({
+          paths: initPath,
+          strokeColor: '#E5007D', strokeOpacity: 0.9, strokeWeight: 3,
+          fillColor: '#E5007D', fillOpacity: 0.2,
+          map: mapC, zIndex: 10,
+        });
+        selectedParcelPoly = initPoly;
+        initPoly._parcelId = `${section}-${numero}`;
+        initPoly._feature = parcelle;
+        loadedParcelIds.add(`${codeInsee}-${section}-${numero}`);
+        viewportParcels.push({ polygon: initPoly, feature: parcelle, id: `${codeInsee}-${section}-${numero}` });
+
+        // Store for viewport loader to recognize
         window._initialParcelId = `${section}-${numero}`;
-        window._initialParcelFeature = parcelle;
 
         // Fetch section contour
         if (codeInsee && section) {
