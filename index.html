@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v21</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v22</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -203,6 +203,7 @@
   <select id="algoSelect" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-family:'Ubuntu',sans-serif;font-size:13px;background:white;">
     <option value="1">Algo 1 — Top 10 prioritaire</option>
     <option value="2">Algo 2 — Progressif 3 phases</option>
+    <option value="3">Algo 3 — Villes > 150k</option>
   </select>
   <button id="goBtn" onclick="go()">Générer les plans</button>
 </div>
@@ -628,6 +629,18 @@ function findCitiesForGeneraleV2(lat, lng) {
   return { cities: refCities, phase: 'P3: 2 villes référence' };
 }
 
+// ===== ALGO 3 — Villes > 150k comme référence =====
+function findCitiesForGeneraleV3(lat, lng) {
+  const citiesWithDist = MAJOR_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5 && c.pop >= 150000)
+    .sort((a,b) => a.dist - b.dist);
+
+  const cities = citiesWithDist.slice(0, 2);
+  const names = cities.map(c => c.nom + ' (' + (c.pop/1000).toFixed(0) + 'k, ' + c.dist.toFixed(0) + 'km)').join(', ');
+  return { cities, phase: '2 villes > 150k: ' + names };
+}
+
 function citiesBounds(lat, lng, cities) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend({ lat, lng });
@@ -826,9 +839,11 @@ async function go() {
         ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
       } else {
         // GÉNÉRALE — use selected algo
-        const result = (selectedAlgo === '2')
-          ? findCitiesForGeneraleV2(bien.lat, bien.lng)
-          : findCitiesForGenerale(bien.lat, bien.lng);
+        const result = (selectedAlgo === '3')
+          ? findCitiesForGeneraleV3(bien.lat, bien.lng)
+          : (selectedAlgo === '2')
+            ? findCitiesForGeneraleV2(bien.lat, bien.lng)
+            : findCitiesForGenerale(bien.lat, bien.lng);
         gCities = result.cities;
         algoPhase = result.phase;
         console.log(`Algo ${selectedAlgo}: ${algoPhase} → ${gCities.map(c => c.nom + ' (' + c.dist.toFixed(0) + 'km)').join(', ')}`);
