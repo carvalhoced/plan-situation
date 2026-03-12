@@ -63,21 +63,25 @@
   }
 
   .map-label {
-    background: var(--rose); color: white; font-size: 13px; font-weight: 600;
+    background: #444444; color: white; font-size: 13px; font-weight: 600;
     text-align: center; padding: 10px 16px; letter-spacing: 0.02em;
   }
 
   .map-container { height: 380px; }
 
-  .capture-btn {
-    width: 100%; padding: 10px; border: none;
-    background: #f5f5f5; color: var(--text);
-    font-family: 'Ubuntu', sans-serif; font-size: 12px; font-weight: 600;
-    cursor: pointer; transition: background 0.2s;
-    border-top: 1px solid var(--border);
+  .algo-tabs {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border); background: #f5f5f5;
   }
 
-  .capture-btn:hover { background: var(--primary); color: white; }
+  .algo-tab {
+    flex: 1; padding: 7px 8px; border: none; background: transparent;
+    font-family: 'Ubuntu', sans-serif; font-size: 11px; font-weight: 500;
+    color: var(--text-light); cursor: pointer; transition: all 0.15s;
+    border-bottom: 2px solid transparent;
+  }
+
+  .algo-tab:hover { color: var(--text); background: #eee; }
+  .algo-tab.active { color: var(--primary); font-weight: 600; border-bottom-color: var(--primary); background: white; }
 
   .cadastre-ref {
     padding: 8px 16px; font-size: 12px; font-weight: 600;
@@ -145,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v29</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v30</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -200,11 +204,6 @@
 
 <div class="search-bar">
   <input type="text" id="addressInput" placeholder="Adresse du bien">
-  <select id="algoSelect" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-family:'Ubuntu',sans-serif;font-size:13px;background:white;">
-    <option value="1">Algo 1 — Top 10 prioritaire</option>
-    <option value="2">Algo 2 — Progressif 3 phases</option>
-    <option value="3">Algo 3 — Villes > 150k</option>
-  </select>
   <button id="goBtn" onclick="go()">Générer les plans</button>
 </div>
 
@@ -213,18 +212,24 @@
 <div class="maps-grid">
   <div class="map-card">
     <div class="map-label">Situation GÉNÉRALE</div>
+    <div class="algo-tabs" id="algoTabsG">
+      <button class="algo-tab active" onclick="switchAlgoG(1)">Algo 1 — Top 10</button>
+      <button class="algo-tab" onclick="switchAlgoG(2)">Algo 2 — Progressif</button>
+      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Villes > 150k</button>
+    </div>
     <div class="map-container" id="mapGeneral"></div>
-    <button class="capture-btn" onclick="capture('general')">Capturer</button>
   </div>
   <div class="map-card">
     <div class="map-label">Situation PARTICULIÈRE</div>
+    <div class="algo-tabs" id="algoTabsP">
+      <button class="algo-tab active" onclick="switchAlgoP(1)">Algo 1 — Commune</button>
+      <button class="algo-tab" onclick="switchAlgoP(2)">Algo 2 — Bien ↔ Centre-ville</button>
+    </div>
     <div class="map-container" id="mapParticuliere"></div>
-    <button class="capture-btn" onclick="capture('particuliere')">Capturer</button>
   </div>
   <div class="map-card">
     <div class="map-label">Vue AÉRIENNE</div>
     <div class="map-container" id="mapAerienne"></div>
-    <button class="capture-btn" onclick="capture('aerienne')">Capturer</button>
   </div>
   <div class="map-card">
     <div class="map-label">Plan CADASTRAL</div>
@@ -232,7 +237,6 @@
     <div class="cadastre-ref" id="cadastreRef"></div>
     <div class="cadastre-list" id="cadastreList"></div>
     <div class="click-hint">Cliquez pour sélectionner/désélectionner des parcelles</div>
-    <button class="capture-btn" onclick="capture('cadastre')">Capturer</button>
   </div>
 </div>
 
@@ -252,6 +256,24 @@ const API_KEY = 'AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g';
 let mapG, mapP, mapA, mapC;
 let markerG, markerP, markerA;
 let currentPolygonsA = [];
+
+// Current algo selections
+let currentAlgoG = '1';
+let currentAlgoP = '1';
+let lastAddress = '';
+let lastBienData = null;
+
+function switchAlgoG(n) {
+  currentAlgoG = '' + n;
+  document.querySelectorAll('#algoTabsG .algo-tab').forEach((t, i) => t.classList.toggle('active', i === n - 1));
+  if (lastAddress) go();
+}
+
+function switchAlgoP(n) {
+  currentAlgoP = '' + n;
+  document.querySelectorAll('#algoTabsP .algo-tab').forEach((t, i) => t.classList.toggle('active', i === n - 1));
+  if (lastAddress) go();
+}
 
 // ===== PIN ICON =====
 const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
@@ -476,7 +498,7 @@ async function fetchArrondissementContour(lat, lng) {
 
 // ===== FETCH COMMUNE CONTOUR =====
 async function fetchCommuneContour(lat, lng) {
-  const url = `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=nom,contour,population,surface&limit=1`;
+  const url = `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=nom,contour,centre,population,surface&limit=1`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const data = await res.json();
@@ -749,6 +771,8 @@ async function go() {
   try {
     // 1. Geocode
     const bien = await geocode(address);
+    lastAddress = address;
+    lastBienData = bien;
     setStatus(`✓ ${bien.display} — récupération des contours…`, 'loading');
 
     // 2. Init maps
@@ -813,31 +837,34 @@ async function go() {
           mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       } else {
-        // Autres grandes villes sans arrondissements → same compact/medium/extended logic
-        communeName = top10.city.nom;
-        try {
-          const communeData = await fetchCommuneContour(bien.lat, bien.lng);
-          const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
+        // Autres grandes villes sans arrondissements
+        if (currentAlgoP === '2') {
+          communeName = await doParticuliereAlgo2(bien);
+        } else {
+          communeName = top10.city.nom;
+          try {
+            const communeData = await fetchCommuneContour(bien.lat, bien.lng);
+            const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
-          if (contourBounds) {
-            const size = communeSizeKm(contourBounds);
-            if (size.max <= 12) {
-              // Top 10 cities are urban → viewport + zoom +1
-              const viewport = await getGoogleViewport(communeName);
-              if (viewport && !isViewportTooWide(viewport, contourBounds)) {
-                mapP.fitBounds(viewport);
+            if (contourBounds) {
+              const size = communeSizeKm(contourBounds);
+              if (size.max <= 12) {
+                const viewport = await getGoogleViewport(communeName);
+                if (viewport && !isViewportTooWide(viewport, contourBounds)) {
+                  mapP.fitBounds(viewport);
+                } else {
+                  mapP.fitBounds(contourBounds);
+                }
               } else {
-                mapP.fitBounds(contourBounds);
+                mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 2.5));
               }
+              fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
             } else {
-              mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 2.5));
+              mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
             }
-            fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
-          } else {
+          } catch(e) {
             mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
           }
-        } catch(e) {
-          mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       }
       markerP = addMarker(mapP, bien.lat, bien.lng);
@@ -856,14 +883,14 @@ async function go() {
       ensurePointsVisible(mapG, nearbyPoints);
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
-      // PARTICULIÈRE → standard commune logic
-      communeName = await doParticuliereStandard(bien);
+      // PARTICULIÈRE
+      communeName = (currentAlgoP === '2') ? await doParticuliereAlgo2(bien) : await doParticuliereStandard(bien);
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else {
       // ===== STANDARD (no top-10 nearby) =====
       modeLabel = 'standard';
-      const selectedAlgo = document.getElementById('algoSelect').value;
+      const selectedAlgo = currentAlgoG;
       const territory = getTerritory(bien.dept);
 
       if (territory) {
@@ -903,8 +930,8 @@ async function go() {
       }
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
-      // PARTICULIÈRE → standard commune logic
-      communeName = await doParticuliereStandard(bien);
+      // PARTICULIÈRE
+      communeName = (currentAlgoP === '2') ? await doParticuliereAlgo2(bien) : await doParticuliereStandard(bien);
       markerP = addMarker(mapP, bien.lat, bien.lng);
     }
 
@@ -1049,7 +1076,54 @@ async function doParticuliereStandard(bien) {
   return communeName;
 }
 
-// Check if Google viewport extends more than 5km beyond commune contour on any edge
+// ===== PARTICULIÈRE ALGO 2 — Bien ↔ Centre-ville, zoom 13-15 =====
+async function doParticuliereAlgo2(bien) {
+  let communeName = '?';
+  try {
+    const communeData = await fetchCommuneContour(bien.lat, bien.lng);
+    if (communeData) {
+      communeName = communeData.nom;
+    }
+
+    // Get commune center
+    let centerLat, centerLng;
+    if (communeData && communeData.centre) {
+      centerLat = communeData.centre.coordinates[1];
+      centerLng = communeData.centre.coordinates[0];
+    } else {
+      // Fallback: center of contour bbox
+      const contourBounds = communeData && communeData.contour ? geojsonToBounds(communeData.contour) : null;
+      if (contourBounds) {
+        centerLat = (contourBounds.getNorthEast().lat() + contourBounds.getSouthWest().lat()) / 2;
+        centerLng = (contourBounds.getNorthEast().lng() + contourBounds.getSouthWest().lng()) / 2;
+      } else {
+        // No data → fall back to algo 1
+        return await doParticuliereStandard(bien);
+      }
+    }
+
+    console.log(communeName + ' centre-ville: ' + centerLat.toFixed(4) + ', ' + centerLng.toFixed(4));
+
+    // FitBounds on [bien, centre-ville] with 20% padding
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: bien.lat, lng: bien.lng });
+    bounds.extend({ lat: centerLat, lng: centerLng });
+    mapP.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 }); // ~20% padding
+
+    // After fitBounds settles → clamp zoom 13-15
+    google.maps.event.addListenerOnce(mapP, 'idle', () => {
+      let z = mapP.getZoom();
+      if (z > 15) mapP.setZoom(15);
+      else if (z < 13) mapP.setZoom(13);
+      console.log(communeName + ': algo2 bien↔centre zoom=' + mapP.getZoom());
+    });
+
+  } catch(e) {
+    console.warn('Particuliere algo2 failed:', e);
+    mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
+  }
+  return communeName;
+}
 function isViewportTooWide(viewport, contourBounds) {
   const MAX_OVERFLOW_RATIO = 0.10; // 10% of contour size
   const vNE = viewport.getNorthEast();
@@ -1095,109 +1169,76 @@ function getGoogleViewport(placeName) {
 }
 
 
-// Store last bien for capture
-let lastBien = null;
-
 function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase) {
-  lastBien = bien;
+  lastBienData = bien;
   document.getElementById('algoPanel').style.display = 'block';
-  const selectedAlgo = document.getElementById('algoSelect').value;
 
   if (top10 && top10.mode === 'inside') {
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
       <p>Mode <span class="value">dans ${top10.city.nom}</span></p>
       <p>Contour de la ville (${top10.city.dist.toFixed(0)}km du centre)</p>
-      <p>Zoom: <span class="value" id="generaleZoomLevel">…</span></p>`;
+      <p>Zoom: <span class="value" id="zoomG">…</span></p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
       <p><span class="value">${communeName || 'quartier'}</span></p>
-      <p>${['Paris', 'Marseille', 'Lyon'].some(c => communeName.includes(c)) ? 'Contour arrondissement' : 'Rayon ~1.2 km'}</p>`;
+      <p>Algo P: <span class="value">${currentAlgoP}</span></p>
+      <p>Zoom: <span class="value" id="zoomP">…</span></p>`;
 
   } else if (top10 && top10.mode === 'nearby') {
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
       <p>Mode <span class="value">proche de ${top10.city.nom}</span></p>
       <p>Bbox bien ↔ ${top10.city.nom} (${top10.city.dist.toFixed(0)}km)</p>
-      <p>Zoom: <span class="value" id="generaleZoomLevel">…</span></p>`;
+      <p>Zoom: <span class="value" id="zoomG">…</span></p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
       <p>Commune: <span class="value">${communeName || '?'}</span></p>
-      <p>Google Geocoder viewport</p>`;
+      <p>Algo P: <span class="value">${currentAlgoP}</span></p>
+      <p>Zoom: <span class="value" id="zoomP">…</span></p>`;
 
   } else {
     const citiesList = gCities.slice(0, 4).map(c =>
       `${c.nom} (${(c.pop/1000).toFixed(0)}k, ${c.dist.toFixed(0)}km)`
     ).join(', ');
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
-      <p>Algo <span class="value">${selectedAlgo}</span> · ${algoPhase || 'standard'}</p>
+      <p>Algo G: <span class="value">${currentAlgoG}</span> · ${algoPhase || 'standard'}</p>
       <p style="font-size:11px;color:#888;margin-top:4px">${citiesList || '—'}</p>
-      <p>Zoom: <span class="value" id="generaleZoomLevel">…</span></p>`;
+      <p>Zoom: <span class="value" id="zoomG">…</span></p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
       <p>Commune: <span class="value">${communeName || '?'}</span></p>
-      <p>Google Geocoder viewport</p>`;
+      <p>Algo P: <span class="value">${currentAlgoP}</span></p>
+      <p>Zoom: <span class="value" id="zoomP">…</span></p>`;
   }
-
-  // Live zoom update for Générale
-  google.maps.event.addListenerOnce(mapG, 'idle', () => {
-    const zEl = document.getElementById('generaleZoomLevel');
-    if (zEl) zEl.textContent = mapG.getZoom();
-  });
 
   document.getElementById('algoAerienne').innerHTML = `<h4>Aérienne</h4>
     <p>Satellite · vue plate · cadré sur parcelle</p>
-    <p>${bien.lat.toFixed(5)}, ${bien.lng.toFixed(5)}</p>`;
+    <p>${bien.lat.toFixed(5)}, ${bien.lng.toFixed(5)}</p>
+    <p>Zoom: <span class="value" id="zoomA">…</span></p>`;
 
   document.getElementById('algoCadastre').innerHTML = `<h4>Cadastre</h4>
     <p>Tuiles IGN Parcellaire Express</p>
     <p><span class="value">${cadastreRef || '—'}</span></p>
-    <p>Zoom: <span class="value" id="cadastreZoomLevel">…</span></p>`;
+    <p>Zoom: <span class="value" id="zoomC">…</span></p>`;
 
-  // Update zoom after map settles
-  google.maps.event.addListenerOnce(mapC, 'idle', () => {
-    const el = document.getElementById('cadastreZoomLevel');
-    if (el) el.textContent = mapC.getZoom();
+  // Live zoom updates for all 4 maps
+  const updateZooms = () => {
+    const zG = document.getElementById('zoomG');
+    const zP = document.getElementById('zoomP');
+    const zA = document.getElementById('zoomA');
+    const zC = document.getElementById('zoomC');
+    if (zG) zG.textContent = mapG.getZoom();
+    if (zP) zP.textContent = mapP.getZoom();
+    if (zA) zA.textContent = mapA.getZoom();
+    if (zC) zC.textContent = mapC.getZoom();
+  };
+  setTimeout(updateZooms, 2000);
+  // Also update on idle
+  ['idle'].forEach(evt => {
+    google.maps.event.addListenerOnce(mapG, evt, updateZooms);
+    google.maps.event.addListenerOnce(mapP, evt, updateZooms);
+    google.maps.event.addListenerOnce(mapA, evt, updateZooms);
+    google.maps.event.addListenerOnce(mapC, evt, updateZooms);
   });
 }
 
 // ===== CAPTURE via Static Maps API =====
-async function capture(type) {
-  let map, mapType, filename;
-  if (type === 'general') { map = mapG; mapType = 'roadmap'; filename = 'situation-generale'; }
-  else if (type === 'particuliere') { map = mapP; mapType = 'roadmap'; filename = 'situation-particuliere'; }
-  else if (type === 'cadastre') { map = mapC; mapType = 'roadmap'; filename = 'plan-cadastral'; }
-  else { map = mapA; mapType = 'satellite'; filename = 'vue-aerienne'; }
-
-  if (!map || !lastBien) return;
-
-  const center = map.getCenter();
-  const zoom = map.getZoom();
-  const w = 640, h = 480; // scale=2 → 1280x960 actual pixels
-
-  // Build Static Maps URL
-  const url = `https://maps.googleapis.com/maps/api/staticmap?`
-    + `center=${center.lat()},${center.lng()}`
-    + `&zoom=${zoom}`
-    + `&size=${w}x${h}`
-    + `&scale=2`
-    + `&maptype=${mapType}`
-    + `&markers=color:0xE5007D|${lastBien.lat},${lastBien.lng}`
-    + `&key=${API_KEY}`;
-
-  // Fetch as blob → download
-  try {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `${filename}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch(e) {
-    // Fallback: open in new tab
-    window.open(url, '_blank');
-  }
-}
-
 document.getElementById('addressInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') go();
 });
