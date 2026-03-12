@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v16</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v17</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -924,23 +924,29 @@ async function doParticuliereStandard(bien) {
 
 // Check if Google viewport extends more than 5km beyond commune contour on any edge
 function isViewportTooWide(viewport, contourBounds) {
-  const MAX_GAP_KM = 5;
+  const MAX_OVERFLOW_RATIO = 0.30; // 30% of contour size
   const vNE = viewport.getNorthEast();
   const vSW = viewport.getSouthWest();
   const cNE = contourBounds.getNorthEast();
   const cSW = contourBounds.getSouthWest();
 
-  // Check each edge: viewport edge vs contour edge
-  const gapNorth = haversine(cNE.lat(), 0, vNE.lat(), 0); // north edge
-  const gapSouth = haversine(cSW.lat(), 0, vSW.lat(), 0); // south edge
-  const gapEast  = haversine(0, cNE.lng(), 0, vNE.lng()); // east edge
-  const gapWest  = haversine(0, cSW.lng(), 0, vSW.lng()); // west edge
+  // Contour dimensions in km
+  const contourH = haversine(cSW.lat(), 0, cNE.lat(), 0);
+  const contourW = haversine(0, cSW.lng(), 0, cNE.lng());
+  const maxGapH = contourH * MAX_OVERFLOW_RATIO;
+  const maxGapW = contourW * MAX_OVERFLOW_RATIO;
 
-  const tooWide = gapNorth > MAX_GAP_KM || gapSouth > MAX_GAP_KM ||
-                  gapEast > MAX_GAP_KM || gapWest > MAX_GAP_KM;
+  // Gaps: how far viewport extends beyond contour on each edge
+  const gapNorth = haversine(cNE.lat(), 0, vNE.lat(), 0);
+  const gapSouth = haversine(cSW.lat(), 0, vSW.lat(), 0);
+  const gapEast  = haversine(0, cNE.lng(), 0, vNE.lng());
+  const gapWest  = haversine(0, cSW.lng(), 0, vSW.lng());
+
+  const tooWide = gapNorth > maxGapH || gapSouth > maxGapH ||
+                  gapEast > maxGapW || gapWest > maxGapW;
 
   if (tooWide) {
-    console.log(`Viewport trop large: N+${gapNorth.toFixed(1)}km S+${gapSouth.toFixed(1)}km E+${gapEast.toFixed(1)}km W+${gapWest.toFixed(1)}km`);
+    console.log(`Viewport trop large (seuil ${MAX_OVERFLOW_RATIO*100}%): N+${gapNorth.toFixed(1)}km/${maxGapH.toFixed(1)} S+${gapSouth.toFixed(1)}km/${maxGapH.toFixed(1)} E+${gapEast.toFixed(1)}km/${maxGapW.toFixed(1)} W+${gapWest.toFixed(1)}km/${maxGapW.toFixed(1)}`);
   }
   return tooWide;
 }
