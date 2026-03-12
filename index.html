@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v18</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v19</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -304,8 +304,12 @@ async function geocode(address) {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const data = await res.json();
   if (!data.features || !data.features.length) throw new Error('Adresse non trouvée');
-  const coords = data.features[0].geometry.coordinates;
-  return { lat: coords[1], lng: coords[0], display: data.features[0].properties.label };
+  const f = data.features[0];
+  const coords = f.geometry.coordinates;
+  const props = f.properties || {};
+  // Extract department code from context (e.g. "2A, Corse-du-Sud, Corse" → "2A")
+  const dept = props.context ? props.context.split(',')[0].trim() : '';
+  return { lat: coords[1], lng: coords[0], display: props.label, dept };
 }
 
 // ===== HAVERSINE =====
@@ -506,9 +510,19 @@ function detectTop10(lat, lng) {
   return null;
 }
 
-// Detect if coordinates are in Corsica
-function isCorsica(lat, lng) {
-  return lat >= 41.3 && lat <= 43.1 && lng >= 8.5 && lng <= 9.6;
+// ===== SPECIAL TERRITORIES (detected by department code from BAN) =====
+const TERRITORIES = {
+  '2A': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
+  '2B': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
+  '971': { nom: 'Guadeloupe', bounds: { sw: { lat: 15.83, lng: -61.81 }, ne: { lat: 16.52, lng: -60.99 } }, zoomPlus: 0 },
+  '972': { nom: 'Martinique', bounds: { sw: { lat: 14.38, lng: -61.24 }, ne: { lat: 14.89, lng: -60.80 } }, zoomPlus: 0 },
+  '973': { nom: 'Guyane', bounds: { sw: { lat: 2.11, lng: -54.60 }, ne: { lat: 5.75, lng: -51.63 } }, zoomPlus: 0 },
+  '974': { nom: 'La Réunion', bounds: { sw: { lat: -21.39, lng: 55.22 }, ne: { lat: -20.87, lng: 55.84 } }, zoomPlus: 0 },
+  '976': { nom: 'Mayotte', bounds: { sw: { lat: -13.01, lng: 44.99 }, ne: { lat: -12.63, lng: 45.31 } }, zoomPlus: 0 },
+};
+
+function getTerritory(dept) {
+  return TERRITORIES[dept] || null;
 }
 
 function findCitiesForGenerale(lat, lng) {
@@ -744,18 +758,21 @@ async function go() {
       // ===== STANDARD (no top-10 nearby) =====
       modeLabel = 'standard';
       const selectedAlgo = document.getElementById('algoSelect').value;
+      const territory = getTerritory(bien.dept);
 
-      if (isCorsica(bien.lat, bien.lng)) {
-        // CORSE → cadrer sur l'île
-        modeLabel = 'Corse';
-        const corseBounds = new google.maps.LatLngBounds(
-          { lat: 41.38, lng: 8.57 },  // SW
-          { lat: 43.03, lng: 9.57 }   // NE
+      if (territory) {
+        // TERRITOIRE SPÉCIAL (Corse, DOM-TOM) → cadrer sur le territoire
+        modeLabel = territory.nom;
+        const terrBounds = new google.maps.LatLngBounds(
+          territory.bounds.sw,
+          territory.bounds.ne
         );
-        mapG.fitBounds(corseBounds);
-        google.maps.event.addListenerOnce(mapG, 'idle', () => {
-          mapG.setZoom(mapG.getZoom() + 1);
-        });
+        mapG.fitBounds(terrBounds);
+        if (territory.zoomPlus > 0) {
+          google.maps.event.addListenerOnce(mapG, 'idle', () => {
+            mapG.setZoom(mapG.getZoom() + territory.zoomPlus);
+          });
+        }
         ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
       } else {
         // GÉNÉRALE — use selected algo
@@ -849,7 +866,7 @@ async function go() {
 
     // ===== ALGO DETAILS =====
     showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
-    setStatus(address + ' — mode: ' + modeLabel, '');
+    setStatus(address + ' — dept: ' + (bien.dept || '?') + ' — mode: ' + modeLabel, '');
 
   } catch(err) {
     setStatus('Erreur: ' + err.message, 'error');
