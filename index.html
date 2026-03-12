@@ -145,11 +145,61 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v19</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v21</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
+<div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+  <span style="font-size:11px;color:var(--text-light);margin-right:2px;">Cas tests :</span>
+  <button onclick="quickTest('12 rue principale 80000 Amiens')">Amiens</button>
+  <button onclick="quickTest('5 IMPASSE DE L ALMA 66390 BAIXAS')">Baixas</button>
+  <button onclick="quickTest('8 rue de la fontaine 68770 Ammerschwihr')">Ammerschwihr</button>
+  <button onclick="quickTest('20 avenue de Figari 20169 Bonifacio')">Bonifacio</button>
+  <button onclick="quickTest('12 place de la Bourse 33000 Bordeaux')">Bordeaux</button>
+  <button onclick="quickTest('5 rue de la gare 14000 Caen')">Caen</button>
+  <button onclick="quickTest('route de Cahors 46090 Mercuès')">Cahors</button>
+  <button onclick="quickTest('3 rue du château 15140 Saint-Bonnet-de-Salers')">St-Bonnet-de-Salers</button>
+  <button onclick="quickTest('2 place de la mairie 22160 Callac')">Callac</button>
+  <button onclick="quickTest('5 rue principale 04170 Thorame-Haute')">Thorame-Haute</button>
+  <button onclick="quickTest('1 rue de la poste 09140 Seix')">Seix</button>
+  <button onclick="quickTest('15 rue de Paris 60260 Lamorlaye')">Lamorlaye</button>
+  <button onclick="quickTest('10 rue Nationale 59000 Lille')">Lille</button>
+  <button onclick="quickTest('12 rue de la République 69001 Lyon')">Lyon</button>
+  <button onclick="quickTest('55 La Canebière 13001 Marseille')">Marseille</button>
+  <button onclick="quickTest('8 place de la Comédie 34000 Montpellier')">Montpellier</button>
+  <button onclick="quickTest('7 rue de la gare 58210 Varzy')">Varzy</button>
+  <button onclick="quickTest('15 promenade des Anglais 06000 Nice')">Nice</button>
+  <button onclick="quickTest('45 rue du Faubourg Saint-Honoré 75008 Paris')">Paris</button>
+  <button onclick="quickTest('15 rue de la gare 63160 Parent')">Parent</button>
+  <button onclick="quickTest('4 rue du commerce 55100 Verdun')">Verdun</button>
+  <button onclick="quickTest('3 rue de la mairie 46800 Saint-Martin-Labouval')">St-Martin-Labouval</button>
+  <button onclick="quickTest('6 rue principale 57230 Bitche')">Bitche</button>
+  <button onclick="quickTest('3 rue de Zurich 67000 Strasbourg')">Strasbourg</button>
+  <button onclick="quickTest('1 place du Capitole 31000 Toulouse')">Toulouse</button>
+  <button onclick="quickTest('12 rue du bourg 39600 Arbois')">Arbois</button>
+  <button onclick="quickTest('5 rue de la mairie 50170 Pontorson')">Pontorson</button>
+</div>
+<div class="quick-tests" style="margin:0 0 16px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+  <span style="font-size:11px;color:var(--text-light);margin-right:2px;">DOM-TOM :</span>
+  <button onclick="quickTest('10 cours Napoléon 20000 Ajaccio')">Corse Sud</button>
+  <button onclick="quickTest('5 boulevard Paoli 20200 Bastia')">Haute-Corse</button>
+  <button onclick="quickTest('12 rue de la République 97100 Basse-Terre')">Guadeloupe</button>
+  <button onclick="quickTest('10 avenue du Général de Gaulle 97300 Cayenne')">Guyane</button>
+  <button onclick="quickTest('15 rue Victor Hugo 97200 Fort-de-France')">Martinique</button>
+  <button onclick="quickTest('3 rue du Commerce 97600 Mamoudzou')">Mayotte</button>
+  <button onclick="quickTest('25 rue Jean Chatel 97400 Saint-Denis')">Réunion</button>
+</div>
+
+<style>
+  .quick-tests button {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px;
+    background: white; font-family: 'Ubuntu', sans-serif; font-size: 11px;
+    color: var(--text); cursor: pointer; transition: all 0.15s;
+  }
+  .quick-tests button:hover { background: var(--primary); color: white; border-color: var(--primary); }
+</style>
+
 <div class="search-bar">
-  <input type="text" id="addressInput" placeholder="Adresse du bien" value="5 IMPASSE DE L'ALMA 66390 BAIXAS FRANCE">
+  <input type="text" id="addressInput" placeholder="Adresse du bien">
   <select id="algoSelect" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-family:'Ubuntu',sans-serif;font-size:13px;background:white;">
     <option value="1">Algo 1 — Top 10 prioritaire</option>
     <option value="2">Algo 2 — Progressif 3 phases</option>
@@ -1334,9 +1384,13 @@ function updateAerienneFromSelection() {
   mapA.fitBounds(bounds);
 }
 
+function quickTest(address) {
+  document.getElementById('addressInput').value = address;
+  go();
+}
+
 function onGoogleMapsReady() {
   initMaps();
-  go();
 }
 </script>
 
