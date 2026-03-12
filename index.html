@@ -145,11 +145,15 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v10</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v11</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
   <input type="text" id="addressInput" placeholder="Adresse du bien" value="5 IMPASSE DE L'ALMA 66390 BAIXAS FRANCE">
+  <select id="algoSelect" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-family:'Ubuntu',sans-serif;font-size:13px;background:white;">
+    <option value="1">Algo 1 — Top 10 prioritaire</option>
+    <option value="2">Algo 2 — Progressif 3 phases</option>
+  </select>
   <button id="goBtn" onclick="go()">Générer les plans</button>
 </div>
 
@@ -544,15 +548,49 @@ function findCitiesForGenerale(lat, lng) {
     .sort((a,b) => a.dist - b.dist);
 
   if (top10WithDist.length > 0) {
-    return [top10WithDist[0]];
+    return { cities: [top10WithDist[0]], phase: 'top10 < 150km' };
   }
 
   // 2. No top-10 nearby → 2 nearest metropoles > 100k
-  return MAJOR_CITIES.map(c => ({
+  const cities = MAJOR_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
   })).filter(c => c.dist > 5 && c.pop >= 100000)
     .sort((a,b) => a.dist - b.dist)
     .slice(0, 2);
+  return { cities, phase: '2 métropoles > 100k' };
+}
+
+// ===== ALGO 2 — Progressif 3 phases =====
+function findCitiesForGeneraleV2(lat, lng) {
+  const top10WithDist = TOP10_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
+
+  const allCitiesWithDist = MAJOR_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
+
+  const nearestTop10 = top10WithDist.length > 0 ? top10WithDist[0] : null;
+
+  // Phase 1: Top 10 < 50km → just that city, tight framing
+  if (nearestTop10 && nearestTop10.dist < 50) {
+    return { cities: [nearestTop10], phase: 'P1: top10 < 50km' };
+  }
+
+  // Phase 2: Top 10 50-100km → that top10 + nearest city > 50k
+  if (nearestTop10 && nearestTop10.dist <= 100) {
+    const nearby50k = allCitiesWithDist
+      .filter(c => c.pop >= 50000 && c.nom !== nearestTop10.nom)
+      .slice(0, 1);
+    const cities = [nearestTop10, ...nearby50k];
+    return { cities, phase: 'P2: top10 < 100km + ville > 50k' };
+  }
+
+  // Phase 3: Top 10 > 100km or absent → 2 nearest reference cities (top10 or >100k)
+  const refCities = allCitiesWithDist
+    .filter(c => c.pop >= 100000 || TOP10_CITIES.some(t => t.nom === c.nom))
+    .slice(0, 2);
+  return { cities: refCities, phase: 'P3: 2 villes référence' };
 }
 
 function citiesBounds(lat, lng, cities) {
@@ -589,6 +627,7 @@ async function go() {
     let gCities = [];
     let communeName = '?';
     let modeLabel = '';
+    let algoPhase = '';
 
     if (top10 && top10.mode === 'inside') {
       // ===== INSIDE A TOP-10 CITY =====
@@ -685,6 +724,7 @@ async function go() {
     } else {
       // ===== STANDARD (no top-10 nearby) =====
       modeLabel = 'standard';
+      const selectedAlgo = document.getElementById('algoSelect').value;
 
       if (isCorsica(bien.lat, bien.lng)) {
         // CORSE → cadrer sur l'île
@@ -698,8 +738,14 @@ async function go() {
           mapG.setZoom(mapG.getZoom() + 1);
         });
       } else {
-        // GÉNÉRALE — nearest top-10 within 150km, or 2 nearest métropoles >100k
-        gCities = findCitiesForGenerale(bien.lat, bien.lng);
+        // GÉNÉRALE — use selected algo
+        const result = (selectedAlgo === '2')
+          ? findCitiesForGeneraleV2(bien.lat, bien.lng)
+          : findCitiesForGenerale(bien.lat, bien.lng);
+        gCities = result.cities;
+        algoPhase = result.phase;
+        console.log(`Algo ${selectedAlgo}: ${algoPhase} → ${gCities.map(c => c.nom + ' (' + c.dist.toFixed(0) + 'km)').join(', ')}`);
+
         if (gCities.length > 0) {
           const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
           padBounds(gBounds, 0.08);
@@ -751,7 +797,7 @@ async function go() {
         // === PLAN CADASTRAL: fit to parcelle bounds, cap zoom ===
         mapC.fitBounds(geojsonToBounds(parcelle.geometry));
         google.maps.event.addListenerOnce(mapC, 'idle', () => {
-          if (mapC.getZoom() > 19) mapC.setZoom(19);
+          if (mapC.getZoom() > 18) mapC.setZoom(18);
         });
 
         // Store initial parcel ID — viewport loader will select it
@@ -766,7 +812,7 @@ async function go() {
         mapA.setCenter({ lat: bien.lat, lng: bien.lng });
         mapA.setZoom(19);
         mapC.setCenter({ lat: bien.lat, lng: bien.lng });
-        mapC.setZoom(19);
+        mapC.setZoom(18);
         document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée';
       }
     } catch(e) {
@@ -774,11 +820,11 @@ async function go() {
       mapA.setCenter({ lat: bien.lat, lng: bien.lng });
       mapA.setZoom(19);
       mapC.setCenter({ lat: bien.lat, lng: bien.lng });
-      mapC.setZoom(19);
+      mapC.setZoom(18);
     }
 
     // ===== ALGO DETAILS =====
-    showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef);
+    showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
     setStatus(address + ' — mode: ' + modeLabel, '');
 
   } catch(err) {
@@ -894,9 +940,10 @@ function getGoogleViewport(placeName) {
 // Store last bien for capture
 let lastBien = null;
 
-function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef) {
+function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase) {
   lastBien = bien;
   document.getElementById('algoPanel').style.display = 'block';
+  const selectedAlgo = document.getElementById('algoSelect').value;
 
   if (top10 && top10.mode === 'inside') {
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
@@ -919,8 +966,8 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreR
       `${c.nom} (${(c.pop/1000).toFixed(0)}k, ${c.dist.toFixed(0)}km)`
     ).join(', ');
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
-      <p>Mode <span class="value">standard</span> · ${gCities.length} métropoles</p>
-      <p style="font-size:11px;color:#888;margin-top:4px">${citiesList}</p>`;
+      <p>Algo <span class="value">${selectedAlgo}</span> · ${algoPhase || 'standard'}</p>
+      <p style="font-size:11px;color:#888;margin-top:4px">${citiesList || '—'}</p>`;
     document.getElementById('algoParticuliere').innerHTML = `<h4>Particulière</h4>
       <p>Commune: <span class="value">${communeName || '?'}</span></p>
       <p>Google Geocoder viewport</p>`;
