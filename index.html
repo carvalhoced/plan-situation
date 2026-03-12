@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v26</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v27</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -669,53 +669,72 @@ function citiesBounds(lat, lng, cities) {
   return bounds;
 }
 
-// Ensure all points (pin + cities) have at least 10% margin from edges — POST-RENDER, PAN ONLY
+// Ensure all points have 10% margin — waits for map to fully settle
 function ensurePointsVisible(map, points, margin = 0.10) {
   setTimeout(() => {
-    const bounds = map.getBounds();
-    if (!bounds) return;
+    checkAndPanForMargin(map, points, margin);
+  }, 1500);
+}
 
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-    const h = ne.lat() - sw.lat();
-    const w = ne.lng() - sw.lng();
-    const mh = h * margin;
-    const mw = w * margin;
+// After fitBounds: zoom +1 → then ensure pin is visible with 10% margin
+// Properly chained via idle events
+function fitBoundsZoomThenEnsurePin(map, lat, lng, margin = 0.10) {
+  // Step 1: wait for fitBounds to settle
+  google.maps.event.addListenerOnce(map, 'idle', () => {
+    // Step 2: zoom +1
+    map.setZoom(map.getZoom() + 1);
+    // Step 3: wait for zoom to settle, then check pin
+    google.maps.event.addListenerOnce(map, 'idle', () => {
+      checkAndPanForMargin(map, [{ lat, lng }], margin);
+    });
+  });
+}
 
-    // Also include any TOP10 city that's within or near the viewport
-    const allPoints = [...points];
+// Core margin check + pan logic (shared)
+function checkAndPanForMargin(map, points, margin) {
+  const bounds = map.getBounds();
+  if (!bounds) return;
+
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const h = ne.lat() - sw.lat();
+  const w = ne.lng() - sw.lng();
+  const mh = h * margin;
+  const mw = w * margin;
+
+  // Also check TOP10 cities near the viewport (only for Générale)
+  const allPoints = [...points];
+  if (map === mapG) {
     for (const c of TOP10_CITIES) {
-      // Check if city is within bounds + small buffer (5% beyond edges)
       const buf = 0.05;
       if (c.lat >= sw.lat() - h * buf && c.lat <= ne.lat() + h * buf &&
           c.lng >= sw.lng() - w * buf && c.lng <= ne.lng() + w * buf) {
-        // Only add if not already in list
         if (!allPoints.some(p => Math.abs(p.lat - c.lat) < 0.01 && Math.abs(p.lng - c.lng) < 0.01)) {
           allPoints.push({ lat: c.lat, lng: c.lng });
           console.log('Top10 in viewport: ' + c.nom);
         }
       }
     }
+  }
 
-    let panLat = 0, panLng = 0;
+  let panLat = 0, panLng = 0;
 
-    for (const p of allPoints) {
-      const gapS = p.lat - sw.lat();
-      if (gapS < mh) panLat = Math.min(panLat, -(mh - gapS));
-      const gapN = ne.lat() - p.lat;
-      if (gapN < mh) panLat = Math.max(panLat, (mh - gapN));
-      const gapW = p.lng - sw.lng();
-      if (gapW < mw) panLng = Math.min(panLng, -(mw - gapW));
-      const gapE = ne.lng() - p.lng;
-      if (gapE < mw) panLng = Math.max(panLng, (mw - gapE));
-    }
+  for (const p of allPoints) {
+    const gapS = p.lat - sw.lat();
+    if (gapS < mh) panLat = Math.min(panLat, -(mh - gapS));
+    const gapN = ne.lat() - p.lat;
+    if (gapN < mh) panLat = Math.max(panLat, (mh - gapN));
+    const gapW = p.lng - sw.lng();
+    if (gapW < mw) panLng = Math.min(panLng, -(mw - gapW));
+    const gapE = ne.lng() - p.lng;
+    if (gapE < mw) panLng = Math.max(panLng, (mw - gapE));
+  }
 
-    if (panLat !== 0 || panLng !== 0) {
-      const center = map.getCenter();
-      map.panTo({ lat: center.lat() + panLat, lng: center.lng() + panLng });
-      console.log('Points margin pan: lat ' + panLat.toFixed(4) + ' lng ' + panLng.toFixed(4));
-    }
-  }, 1500);
+  if (panLat !== 0 || panLng !== 0) {
+    const center = map.getCenter();
+    map.panTo({ lat: center.lat() + panLat, lng: center.lng() + panLng });
+    console.log('Margin pan: lat ' + panLat.toFixed(4) + ' lng ' + panLng.toFixed(4));
+  }
 }
 
 // ===== MAIN =====
@@ -797,20 +816,16 @@ async function go() {
         // Autres grandes villes sans arrondissements → Google viewport with validation
         communeName = top10.city.nom;
         try {
-          const viewport = await getGoogleViewport(address);
+          const viewport = await getGoogleViewport(communeName);
           const communeData = await fetchCommuneContour(bien.lat, bien.lng);
           const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
           if (viewport && (!contourBounds || !isViewportTooWide(viewport, contourBounds))) {
             mapP.fitBounds(viewport);
-            google.maps.event.addListenerOnce(mapP, 'idle', () => {
-              mapP.setZoom(mapP.getZoom() + 1);
-            });
+            fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
           } else if (contourBounds) {
             mapP.fitBounds(contourBounds);
-            google.maps.event.addListenerOnce(mapP, 'idle', () => {
-              mapP.setZoom(mapP.getZoom() + 1);
-            });
+            fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
           } else {
             mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
           }
@@ -818,7 +833,6 @@ async function go() {
           mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       }
-      ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else if (top10 && top10.mode === 'nearby') {
@@ -836,7 +850,7 @@ async function go() {
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
       // PARTICULIÈRE → standard commune logic
-      communeName = await doParticuliereStandard(bien, address);
+      communeName = await doParticuliereStandard(bien);
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else {
@@ -883,7 +897,7 @@ async function go() {
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
       // PARTICULIÈRE → standard commune logic
-      communeName = await doParticuliereStandard(bien, address);
+      communeName = await doParticuliereStandard(bien);
       markerP = addMarker(mapP, bien.lat, bien.lng);
     }
 
@@ -964,7 +978,7 @@ async function go() {
 }
 
 // ===== STANDARD PARTICULIÈRE LOGIC (shared by nearby + standard) =====
-async function doParticuliereStandard(bien, address) {
+async function doParticuliereStandard(bien) {
   let communeName = '?';
   try {
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
@@ -972,38 +986,28 @@ async function doParticuliereStandard(bien, address) {
       communeName = communeData.nom;
     }
 
-    // 2. Try Google Geocoder viewport with FULL ADDRESS (not commune name)
-    const viewport = await getGoogleViewport(address);
+    // 2. Try Google Geocoder viewport (commune name — Google returns city-level viewport)
+    const viewport = await getGoogleViewport(communeName);
     const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
       if (viewport && contourBounds && !isViewportTooWide(viewport, contourBounds)) {
-        // Viewport is reasonable → use it + zoom +1 + recenter pin
         mapP.fitBounds(viewport);
-        google.maps.event.addListenerOnce(mapP, 'idle', () => {
-          mapP.setZoom(mapP.getZoom() + 1);
-        });
-        ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
+        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
         console.log(communeName + ': Google viewport + zoom +1');
         return communeName;
       }
 
       if (viewport && !contourBounds) {
         mapP.fitBounds(viewport);
-        google.maps.event.addListenerOnce(mapP, 'idle', () => {
-          mapP.setZoom(mapP.getZoom() + 1);
-        });
-        ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
+        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
         console.log(communeName + ': Google viewport + zoom +1 (no contour)');
         return communeName;
       }
 
-      // Viewport too wide → fallback to contour + zoom +1 + recenter pin
+      // Viewport too wide → fallback to contour
       if (contourBounds) {
         mapP.fitBounds(contourBounds);
-        google.maps.event.addListenerOnce(mapP, 'idle', () => {
-          mapP.setZoom(mapP.getZoom() + 1);
-        });
-        ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
+        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
         console.log(communeName + ': fallback contour + zoom +1');
         return communeName;
       }
@@ -1011,9 +1015,7 @@ async function doParticuliereStandard(bien, address) {
     // 3. Last fallback: radius
     if (communeData && communeData.contour) {
       mapP.fitBounds(geojsonToBounds(communeData.contour));
-      google.maps.event.addListenerOnce(mapP, 'idle', () => {
-        mapP.setZoom(mapP.getZoom() + 1);
-      });
+      fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
       console.log(communeName + ': fallback contour + zoom +1');
     } else {
       mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
