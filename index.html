@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v24</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v25</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -169,7 +169,7 @@
   <button onclick="quickTest('7 rue de la gare 58210 Varzy')">Varzy</button>
   <button onclick="quickTest('15 promenade des Anglais 06000 Nice')">Nice</button>
   <button onclick="quickTest('45 rue du Faubourg Saint-Honoré 75008 Paris')">Paris</button>
-  <button onclick="quickTest('15 rue de la gare 63160 Parent')">Parent</button>
+  <button onclick="quickTest('10 rue du Ponteil 63500 Issoire')">Issoire</button>
   <button onclick="quickTest('4 rue du commerce 55100 Verdun')">Verdun</button>
   <button onclick="quickTest('3 rue de la mairie 46800 Saint-Martin-Labouval')">St-Martin-Labouval</button>
   <button onclick="quickTest('6 rue principale 57230 Bitche')">Bitche</button>
@@ -715,7 +715,7 @@ function ensurePointsVisible(map, points, margin = 0.10) {
       map.panTo({ lat: center.lat() + panLat, lng: center.lng() + panLng });
       console.log('Points margin pan: lat ' + panLat.toFixed(4) + ' lng ' + panLng.toFixed(4));
     }
-  }, 800);
+  }, 1500);
 }
 
 // ===== MAIN =====
@@ -818,6 +818,7 @@ async function go() {
           mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       }
+      ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else if (top10 && top10.mode === 'nearby') {
@@ -978,32 +979,34 @@ async function doParticuliereStandard(bien) {
       const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
       if (viewport && contourBounds && !isViewportTooWide(viewport, contourBounds)) {
-        // Viewport is reasonable → use it
+        // Viewport is reasonable → use it + zoom +1 + recenter pin
         mapP.fitBounds(viewport);
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
           mapP.setZoom(mapP.getZoom() + 1);
         });
-        console.log(communeName + ': Google viewport OK (within 5km of contour)');
+        ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
+        console.log(communeName + ': Google viewport + zoom +1');
         return communeName;
       }
 
       if (viewport && !contourBounds) {
-        // No contour to compare → use viewport anyway
         mapP.fitBounds(viewport);
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
           mapP.setZoom(mapP.getZoom() + 1);
         });
-        console.log(communeName + ': Google viewport (no contour to validate)');
+        ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
+        console.log(communeName + ': Google viewport + zoom +1 (no contour)');
         return communeName;
       }
 
-      // Viewport too wide → fallback to contour + zoom +1
+      // Viewport too wide → fallback to contour + zoom +1 + recenter pin
       if (contourBounds) {
         mapP.fitBounds(contourBounds);
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
           mapP.setZoom(mapP.getZoom() + 1);
         });
-        console.log(communeName + ': viewport trop large, fallback contour + zoom +1');
+        ensurePointsVisible(mapP, [{ lat: bien.lat, lng: bien.lng }]);
+        console.log(communeName + ': fallback contour + zoom +1');
         return communeName;
       }
     }
@@ -1053,18 +1056,21 @@ function isViewportTooWide(viewport, contourBounds) {
 }
 
 // Google Geocoder: get viewport bounds for a place name
-function getGoogleViewport(placeName) {
-  return new Promise((resolve) => {
+async function getGoogleViewport(placeName) {
+  try {
     const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ address: placeName + ', France' }, (results, status) => {
-      if (status === 'OK' && results[0] && results[0].geometry.viewport) {
-        resolve(results[0].geometry.viewport);
-      } else {
-        console.warn('Google Geocoder: no viewport for', placeName, status);
-        resolve(null);
-      }
-    });
-  });
+    const response = await geocoder.geocode({ address: placeName + ', France' });
+    if (response.results && response.results[0] && response.results[0].geometry.viewport) {
+      const vp = response.results[0].geometry.viewport;
+      console.log(placeName + ' viewport:', vp.toJSON());
+      return vp;
+    }
+    console.warn('Google Geocoder: no viewport for', placeName);
+    return null;
+  } catch(e) {
+    console.warn('Google Geocoder error for', placeName, e);
+    return null;
+  }
 }
 
 
