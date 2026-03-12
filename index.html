@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v22</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v24</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -629,16 +629,37 @@ function findCitiesForGeneraleV2(lat, lng) {
   return { cities: refCities, phase: 'P3: 2 villes référence' };
 }
 
-// ===== ALGO 3 — Villes > 150k comme référence =====
+// ===== ALGO 3 — Comme algo 2 mais villes > 150k =====
 function findCitiesForGeneraleV3(lat, lng) {
-  const citiesWithDist = MAJOR_CITIES.map(c => ({
+  const top10WithDist = TOP10_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
-  })).filter(c => c.dist > 5 && c.pop >= 150000)
-    .sort((a,b) => a.dist - b.dist);
+  })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
 
-  const cities = citiesWithDist.slice(0, 2);
-  const names = cities.map(c => c.nom + ' (' + (c.pop/1000).toFixed(0) + 'k, ' + c.dist.toFixed(0) + 'km)').join(', ');
-  return { cities, phase: '2 villes > 150k: ' + names };
+  const allCitiesWithDist = MAJOR_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
+
+  const nearestTop10 = top10WithDist.length > 0 ? top10WithDist[0] : null;
+
+  // Phase 1: Top 10 < 50km → just that city
+  if (nearestTop10 && nearestTop10.dist < 50) {
+    return { cities: [nearestTop10], phase: 'P1: top10 < 50km' };
+  }
+
+  // Phase 2: Top 10 50-100km → that top10 + nearest city > 50k
+  if (nearestTop10 && nearestTop10.dist <= 100) {
+    const nearby50k = allCitiesWithDist
+      .filter(c => c.pop >= 50000 && c.nom !== nearestTop10.nom)
+      .slice(0, 1);
+    const cities = [nearestTop10, ...nearby50k];
+    return { cities, phase: 'P2: top10 < 100km + ville > 50k' };
+  }
+
+  // Phase 3: Top 10 > 100km → 2 nearest cities > 150k (or top10)
+  const refCities = allCitiesWithDist
+    .filter(c => c.pop >= 150000 || TOP10_CITIES.some(t => t.nom === c.nom))
+    .slice(0, 2);
+  return { cities: refCities, phase: 'P3: 2 villes > 150k' };
 }
 
 function citiesBounds(lat, lng, cities) {
@@ -1018,18 +1039,16 @@ function isViewportTooWide(viewport, contourBounds) {
   const maxGapH = contourH * MAX_OVERFLOW_RATIO;
   const maxGapW = contourW * MAX_OVERFLOW_RATIO;
 
-  // Gaps: how far viewport extends beyond contour on each edge
-  const gapNorth = haversine(cNE.lat(), 0, vNE.lat(), 0);
-  const gapSouth = haversine(cSW.lat(), 0, vSW.lat(), 0);
-  const gapEast  = haversine(0, cNE.lng(), 0, vNE.lng());
-  const gapWest  = haversine(0, cSW.lng(), 0, vSW.lng());
+  // Only count overflow if viewport EXTENDS BEYOND contour (not if it's inside)
+  const gapNorth = vNE.lat() > cNE.lat() ? haversine(cNE.lat(), 0, vNE.lat(), 0) : 0;
+  const gapSouth = vSW.lat() < cSW.lat() ? haversine(cSW.lat(), 0, vSW.lat(), 0) : 0;
+  const gapEast  = vNE.lng() > cNE.lng() ? haversine(0, cNE.lng(), 0, vNE.lng()) : 0;
+  const gapWest  = vSW.lng() < cSW.lng() ? haversine(0, cSW.lng(), 0, vSW.lng()) : 0;
 
   const tooWide = gapNorth > maxGapH || gapSouth > maxGapH ||
                   gapEast > maxGapW || gapWest > maxGapW;
 
-  if (tooWide) {
-    console.log(`Viewport trop large (seuil ${MAX_OVERFLOW_RATIO*100}%): N+${gapNorth.toFixed(1)}km/${maxGapH.toFixed(1)} S+${gapSouth.toFixed(1)}km/${maxGapH.toFixed(1)} E+${gapEast.toFixed(1)}km/${maxGapW.toFixed(1)} W+${gapWest.toFixed(1)}km/${maxGapW.toFixed(1)}`);
-  }
+  console.log(`Viewport check (seuil ${MAX_OVERFLOW_RATIO*100}%): N+${gapNorth.toFixed(1)}/${maxGapH.toFixed(1)} S+${gapSouth.toFixed(1)}/${maxGapH.toFixed(1)} E+${gapEast.toFixed(1)}/${maxGapW.toFixed(1)} W+${gapWest.toFixed(1)}/${maxGapW.toFixed(1)} → ${tooWide ? 'REJETÉ' : 'OK'}`);
   return tooWide;
 }
 
