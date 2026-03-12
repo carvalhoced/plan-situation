@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v25</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v26</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -797,7 +797,7 @@ async function go() {
         // Autres grandes villes sans arrondissements → Google viewport with validation
         communeName = top10.city.nom;
         try {
-          const viewport = await getGoogleViewport(communeName);
+          const viewport = await getGoogleViewport(address);
           const communeData = await fetchCommuneContour(bien.lat, bien.lng);
           const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
@@ -836,7 +836,7 @@ async function go() {
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
       // PARTICULIÈRE → standard commune logic
-      communeName = await doParticuliereStandard(bien);
+      communeName = await doParticuliereStandard(bien, address);
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else {
@@ -883,7 +883,7 @@ async function go() {
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
       // PARTICULIÈRE → standard commune logic
-      communeName = await doParticuliereStandard(bien);
+      communeName = await doParticuliereStandard(bien, address);
       markerP = addMarker(mapP, bien.lat, bien.lng);
     }
 
@@ -964,19 +964,17 @@ async function go() {
 }
 
 // ===== STANDARD PARTICULIÈRE LOGIC (shared by nearby + standard) =====
-async function doParticuliereStandard(bien) {
+async function doParticuliereStandard(bien, address) {
   let communeName = '?';
   try {
-    // 1. Get commune name + contour from geo.api.gouv.fr
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
     if (communeData) {
       communeName = communeData.nom;
     }
 
-    // 2. Try Google Geocoder viewport
-    if (communeName !== '?') {
-      const viewport = await getGoogleViewport(communeName);
-      const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
+    // 2. Try Google Geocoder viewport with FULL ADDRESS (not commune name)
+    const viewport = await getGoogleViewport(address);
+    const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
       if (viewport && contourBounds && !isViewportTooWide(viewport, contourBounds)) {
         // Viewport is reasonable → use it + zoom +1 + recenter pin
@@ -1009,7 +1007,6 @@ async function doParticuliereStandard(bien) {
         console.log(communeName + ': fallback contour + zoom +1');
         return communeName;
       }
-    }
 
     // 3. Last fallback: radius
     if (communeData && communeData.contour) {
