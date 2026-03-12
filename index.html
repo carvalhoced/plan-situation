@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v15</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v16</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -783,8 +783,11 @@ async function go() {
       markerP = addMarker(mapP, bien.lat, bien.lng);
     }
 
-    // ===== DRAW COMMUNE CONTOUR on Particulière (not for inside mode — already handled) =====
-    if (!top10 || top10.mode !== 'inside') {
+    // ===== DRAW COMMUNE CONTOUR on Particulière =====
+    // Skip only for arrondissement cities (Paris/Lyon/Marseille) — they draw the arrondissement contour instead
+    const arrCities = ['Paris', 'Marseille', 'Lyon'];
+    const skipContour = top10 && top10.mode === 'inside' && arrCities.includes(top10.city.nom);
+    if (!skipContour) {
       try {
         const contourData = await fetchCommuneContour(bien.lat, bien.lng);
         if (contourData && contourData.contour) {
