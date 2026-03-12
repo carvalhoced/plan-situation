@@ -145,7 +145,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v17</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v18</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="search-bar">
@@ -924,7 +924,7 @@ async function doParticuliereStandard(bien) {
 
 // Check if Google viewport extends more than 5km beyond commune contour on any edge
 function isViewportTooWide(viewport, contourBounds) {
-  const MAX_OVERFLOW_RATIO = 0.30; // 30% of contour size
+  const MAX_OVERFLOW_RATIO = 0.10; // 10% of contour size
   const vNE = viewport.getNorthEast();
   const vSW = viewport.getSouthWest();
   const cNE = contourBounds.getNorthEast();
