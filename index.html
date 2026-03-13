@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v33</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v34</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -215,7 +215,7 @@
     <div class="algo-tabs" id="algoTabsG">
       <button class="algo-tab active" onclick="switchAlgoG(1)">Algo 1 — Top 10</button>
       <button class="algo-tab" onclick="switchAlgoG(2)">Algo 2 — Progressif</button>
-      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Villes > 150k</button>
+      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Villes > 140k</button>
     </div>
     <div class="map-container" id="mapGeneral"></div>
   </div>
@@ -681,7 +681,7 @@ function findCitiesForGeneraleV3(lat, lng) {
   const refCities = allCitiesWithDist
     .filter(c => c.pop >= 140000 || TOP10_CITIES.some(t => t.nom === c.nom))
     .slice(0, 2);
-  return { cities: refCities, phase: 'P3: 2 villes > 150k' };
+  return { cities: refCities, phase: 'P3: 2 villes > 140k' };
 }
 
 function citiesBounds(lat, lng, cities) {
@@ -701,14 +701,18 @@ function ensurePointsVisible(map, points, margin = 0.10) {
 // After fitBounds: zoom +1 → then ensure pin is visible with 10% margin
 // Properly chained via idle events
 function fitBoundsZoomThenEnsurePin(map, lat, lng, margin = 0.10, maxZoom = 16) {
+  // Set hard maxZoom on map so fitBounds + zoom+1 can never exceed it
+  map.setOptions({ maxZoom: maxZoom });
+  
   // Step 1: wait for fitBounds to settle
   google.maps.event.addListenerOnce(map, 'idle', () => {
-    // Step 2: zoom +1, then cap at maxZoom
-    let newZoom = Math.min(map.getZoom() + 1, maxZoom);
-    map.setZoom(newZoom);
-    // Step 3: wait for zoom to settle, then check pin
+    // Step 2: zoom +1 (capped by maxZoom)
+    map.setZoom(map.getZoom() + 1);
+    // Step 3: wait for zoom to settle, then check pin, then remove maxZoom cap
     google.maps.event.addListenerOnce(map, 'idle', () => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
+      // Remove maxZoom cap so user can zoom manually
+      map.setOptions({ maxZoom: null });
     });
   });
 }
