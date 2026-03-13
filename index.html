@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v34</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v36</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -215,7 +215,7 @@
     <div class="algo-tabs" id="algoTabsG">
       <button class="algo-tab active" onclick="switchAlgoG(1)">Algo 1 — Top 10</button>
       <button class="algo-tab" onclick="switchAlgoG(2)">Algo 2 — Progressif</button>
-      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Villes > 140k</button>
+      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Villes > 150k</button>
     </div>
     <div class="map-container" id="mapGeneral"></div>
   </div>
@@ -679,9 +679,15 @@ function findCitiesForGeneraleV3(lat, lng) {
 
   // Phase 3: Top 10 > 100km → 2 nearest cities > 150k (or top10)
   const refCities = allCitiesWithDist
-    .filter(c => c.pop >= 140000 || TOP10_CITIES.some(t => t.nom === c.nom))
+    .filter(c => c.pop >= 150000 || TOP10_CITIES.some(t => t.nom === c.nom))
     .slice(0, 2);
-  return { cities: refCities, phase: 'P3: 2 villes > 140k' };
+
+  // Bonus: add any city > 100k within 50km (not already in list)
+  const nearbyCities = allCitiesWithDist
+    .filter(c => c.pop >= 100000 && c.dist < 50 && !refCities.some(r => r.nom === c.nom));
+  const cities = [...refCities, ...nearbyCities];
+
+  return { cities, phase: 'P3: 2 villes > 150k' + (nearbyCities.length ? ' + ' + nearbyCities.map(c => c.nom).join(', ') + ' (< 50km)' : '') };
 }
 
 function citiesBounds(lat, lng, cities) {
@@ -700,21 +706,23 @@ function ensurePointsVisible(map, points, margin = 0.10) {
 
 // After fitBounds: zoom +1 → then ensure pin is visible with 10% margin
 // Properly chained via idle events
+// Zoom +1 after fitBounds, capped at maxZoom, then ensure pin visible
+// Uses simple setTimeout — more reliable than idle chaining
 function fitBoundsZoomThenEnsurePin(map, lat, lng, margin = 0.10, maxZoom = 16) {
-  // Set hard maxZoom on map so fitBounds + zoom+1 can never exceed it
-  map.setOptions({ maxZoom: maxZoom });
-  
-  // Step 1: wait for fitBounds to settle
-  google.maps.event.addListenerOnce(map, 'idle', () => {
-    // Step 2: zoom +1 (capped by maxZoom)
-    map.setZoom(map.getZoom() + 1);
-    // Step 3: wait for zoom to settle, then check pin, then remove maxZoom cap
-    google.maps.event.addListenerOnce(map, 'idle', () => {
+  setTimeout(() => {
+    const z = map.getZoom();
+    const target = Math.min(z + 1, maxZoom);
+    if (z > maxZoom) {
+      map.setZoom(maxZoom);
+    } else {
+      map.setZoom(target);
+    }
+    console.log('fitBoundsZoom: was ' + z + ' → set ' + Math.min(z > maxZoom ? maxZoom : target) + ' (max ' + maxZoom + ')');
+    // Then check pin after zoom settles
+    setTimeout(() => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
-      // Remove maxZoom cap so user can zoom manually
-      map.setOptions({ maxZoom: null });
-    });
-  });
+    }, 600);
+  }, 600);
 }
 
 // Core margin check + pan logic (shared)
@@ -1011,6 +1019,18 @@ async function go() {
     // ===== ALGO DETAILS =====
     showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
     setStatus(address + ' — dept: ' + (bien.dept || '?') + ' — mode: ' + modeLabel, '');
+
+    // Safety: final zoom cap after everything settles
+    setTimeout(() => {
+      if (currentAlgoP === '1' && mapP.getZoom() > 18) {
+        console.log('SAFETY CAP Particulière: ' + mapP.getZoom() + ' → 18');
+        mapP.setZoom(18);
+      }
+      if (mapA.getZoom() > 19) {
+        console.log('SAFETY CAP Aérienne: ' + mapA.getZoom() + ' → 19');
+        mapA.setZoom(19);
+      }
+    }, 2000);
 
   } catch(err) {
     setStatus('Erreur: ' + err.message, 'error');
