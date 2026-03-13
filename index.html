@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v37</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v38</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -697,8 +697,8 @@ function citiesBounds(lat, lng, cities) {
   return bounds;
 }
 
-// Ensure all points have 10% margin — waits for map to fully settle
-function ensurePointsVisible(map, points, margin = 0.10) {
+// Ensure all points have margin — waits for map to fully settle
+function ensurePointsVisible(map, points, margin = 0.15) {
   setTimeout(() => {
     checkAndPanForMargin(map, points, margin);
   }, 1500);
