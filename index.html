@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v41</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v42</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -1104,18 +1104,26 @@ async function doParticuliereStandard(bien) {
   return communeName;
 }
 
-// ===== PARTICULIÈRE ALGO 2 — Bien ↔ Centre-ville, zoom 13-15 =====
+// ===== PARTICULIÈRE ALGO 2 — Bien ↔ Centre-ville =====
 async function doParticuliereAlgo2(bien) {
   let communeName = '?';
-  // No zoom cap for algo 2
-  mapP.setOptions({ maxZoom: null });
   try {
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
     if (communeData) {
       communeName = communeData.nom;
     }
 
-    // Get centre-ville via Google Geocoder (location, not viewport)
+    // Determine maxZoom based on commune size
+    const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
+    let maxZoom = 16;
+    if (contourBounds) {
+      const size = communeSizeKm(contourBounds);
+      if (size.max < 2) maxZoom = 18;
+      console.log(communeName + ' bbox: ' + size.max.toFixed(1) + 'km → maxZoom ' + maxZoom);
+    }
+    mapP.setOptions({ maxZoom: maxZoom });
+
+    // Get centre-ville via Google Geocoder
     const center = await getGoogleCenterLocation(communeName, bien.lat, bien.lng);
     if (!center) {
       console.warn('Algo2: pas de centre-ville Google, fallback algo1');
@@ -1128,20 +1136,20 @@ async function doParticuliereAlgo2(bien) {
     bounds.extend({ lat: center.lat, lng: center.lng });
     mapP.fitBounds(bounds);
 
-    // After fitBounds settles → clamp zoom min 13 then ensure both points visible with 20% padding
-    google.maps.event.addListenerOnce(mapP, 'idle', () => {
+    // After fitBounds → clamp zoom min 13, ensure both points visible with 20% padding, release maxZoom
+    setTimeout(() => {
       let z = mapP.getZoom();
       if (z < 13) mapP.setZoom(13);
-
-      // After zoom clamp settles → ensure both points have 20% margin
-      google.maps.event.addListenerOnce(mapP, 'idle', () => {
+      setTimeout(() => {
         checkAndPanForMargin(mapP, [
           { lat: bien.lat, lng: bien.lng },
           { lat: center.lat, lng: center.lng }
         ], 0.20);
         console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom());
-      });
-    });
+        // Release maxZoom for manual zoom
+        setTimeout(() => { mapP.setOptions({ maxZoom: null }); }, 500);
+      }, 500);
+    }, 500);
 
   } catch(e) {
     console.warn('Particuliere algo2 failed:', e);
