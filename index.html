@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v39</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v41</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -452,7 +452,7 @@ function drawCommuneContour(map, geojson) {
 // ===== FETCH PARCELLE CADASTRALE (IGN API Carto) =====
 async function fetchParcelleCadastre(lat, lng) {
   // Tiny polygon for precise parcel detection at exact coordinates
-  const d = 0.00005; // ~5m
+  const d = 0.0001; // ~10m
   const geom = JSON.stringify({
     type: 'Polygon',
     coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
@@ -713,16 +713,16 @@ function ensurePointsVisible(map, points, margin = 0.15) {
   }, 1500);
 }
 
-// After fitBounds: zoom +1 → then ensure pin is visible with 10% margin
-// Properly chained via idle events
-// Zoom +1 after fitBounds, then ensure pin visible. maxZoom must be set on map BEFORE fitBounds.
+// Zoom +1 after fitBounds, then ensure pin visible, then release maxZoom
 function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.10) {
   setTimeout(() => {
     map.setZoom(map.getZoom() + 1);
     setTimeout(() => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
       // Release maxZoom so user can zoom manually
-      map.setOptions({ maxZoom: null });
+      setTimeout(() => {
+        map.setOptions({ maxZoom: null });
+      }, 500);
     }, 500);
   }, 500);
 }
@@ -829,13 +829,13 @@ async function go() {
       // PARTICULIÈRE → arrondissement (Paris/Lyon/Marseille) or neighbourhood
       const citiesWithArrondissements = ['Paris', 'Marseille', 'Lyon'];
       if (citiesWithArrondissements.includes(top10.city.nom)) {
+        mapP.setOptions({ maxZoom: 16 });
         try {
           const arrData = await fetchArrondissementContour(bien.lat, bien.lng);
           if (arrData && arrData.nom) {
             communeName = arrData.nom;
             if (arrData.contour) {
               const arrBounds = geojsonToBounds(arrData.contour);
-              mapP.setOptions({ maxZoom: 16 });
               mapP.fitBounds(arrBounds);
               drawCommuneContour(mapP, arrData.contour);
               zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
@@ -857,13 +857,13 @@ async function go() {
           communeName = await doParticuliereAlgo2(bien);
         } else {
           communeName = top10.city.nom;
+          mapP.setOptions({ maxZoom: 16 });
           try {
             const communeData = await fetchCommuneContour(bien.lat, bien.lng);
             const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
 
             if (contourBounds) {
               const size = communeSizeKm(contourBounds);
-              mapP.setOptions({ maxZoom: 16 });
               if (size.max <= 12) {
                 const viewport = await getGoogleViewport(communeName);
                 if (viewport && !isViewportTooWide(viewport, contourBounds)) {
@@ -972,6 +972,7 @@ async function go() {
 
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
+      console.log('Cadastre fetch result:', parcelle ? 'OK' : 'NULL', 'for', bien.lat.toFixed(5), bien.lng.toFixed(5));
       if (parcelle) {
         const props = parcelle.properties || {};
         const section = props.section || '?';
@@ -1023,10 +1024,6 @@ async function go() {
 
     // Safety: final zoom cap after everything settles
     setTimeout(() => {
-      if (currentAlgoP === '1' && mapP.getZoom() > 18) {
-        console.log('SAFETY CAP Particulière: ' + mapP.getZoom() + ' → 18');
-        mapP.setZoom(18);
-      }
       if (mapA.getZoom() > 19) {
         console.log('SAFETY CAP Aérienne: ' + mapA.getZoom() + ' → 19');
         mapA.setZoom(19);
@@ -1053,6 +1050,8 @@ function communeSizeKm(bounds) {
 // ===== STANDARD PARTICULIÈRE LOGIC (shared by nearby + standard) =====
 async function doParticuliereStandard(bien) {
   let communeName = '?';
+  // Cap zoom at 16 for algo 1 — released in zoomPlusThenEnsurePin
+  mapP.setOptions({ maxZoom: 16 });
   try {
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
     if (communeData) {
@@ -1067,11 +1066,9 @@ async function doParticuliereStandard(bien) {
 
       if (size.max < 6) {
         // COMPACTE → montrer toute la commune + zoom +1
-        const maxZoom = size.max < 2 ? 18 : 16;
-        mapP.setOptions({ maxZoom: maxZoom });
         mapP.fitBounds(contourBounds);
         zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
-        console.log(communeName + ': compacte → contour + zoom +1 (max ' + maxZoom + ')');
+        console.log(communeName + ': compacte → contour + zoom +1');
         return communeName;
       }
 
@@ -1079,13 +1076,11 @@ async function doParticuliereStandard(bien) {
         // MOYENNE → viewport Google + zoom +1, max 16
         const viewport = await getGoogleViewport(communeName);
         if (viewport && !isViewportTooWide(viewport, contourBounds)) {
-          mapP.setOptions({ maxZoom: 16 });
           mapP.fitBounds(viewport);
           zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
           console.log(communeName + ': moyenne → viewport + zoom +1 (max 16)');
           return communeName;
         }
-        mapP.setOptions({ maxZoom: 16 });
         mapP.fitBounds(contourBounds);
         zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
         console.log(communeName + ': moyenne → fallback contour + zoom +1 (max 16)');
@@ -1093,7 +1088,6 @@ async function doParticuliereStandard(bien) {
       }
 
       // ÉTENDUE (> 12 km) → centrer sur le bien, rayon 2.5 km, max 16
-      mapP.setOptions({ maxZoom: 16 });
       mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 2.5));
       zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
       console.log(communeName + ': étendue (' + size.max.toFixed(0) + 'km) → rayon 2.5km autour du bien');
@@ -1113,6 +1107,8 @@ async function doParticuliereStandard(bien) {
 // ===== PARTICULIÈRE ALGO 2 — Bien ↔ Centre-ville, zoom 13-15 =====
 async function doParticuliereAlgo2(bien) {
   let communeName = '?';
+  // No zoom cap for algo 2
+  mapP.setOptions({ maxZoom: null });
   try {
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
     if (communeData) {
