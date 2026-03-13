@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v32</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v33</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -679,7 +679,7 @@ function findCitiesForGeneraleV3(lat, lng) {
 
   // Phase 3: Top 10 > 100km → 2 nearest cities > 150k (or top10)
   const refCities = allCitiesWithDist
-    .filter(c => c.pop >= 150000 || TOP10_CITIES.some(t => t.nom === c.nom))
+    .filter(c => c.pop >= 140000 || TOP10_CITIES.some(t => t.nom === c.nom))
     .slice(0, 2);
   return { cities: refCities, phase: 'P3: 2 villes > 150k' };
 }
@@ -700,11 +700,12 @@ function ensurePointsVisible(map, points, margin = 0.10) {
 
 // After fitBounds: zoom +1 → then ensure pin is visible with 10% margin
 // Properly chained via idle events
-function fitBoundsZoomThenEnsurePin(map, lat, lng, margin = 0.10) {
+function fitBoundsZoomThenEnsurePin(map, lat, lng, margin = 0.10, maxZoom = 16) {
   // Step 1: wait for fitBounds to settle
   google.maps.event.addListenerOnce(map, 'idle', () => {
-    // Step 2: zoom +1
-    map.setZoom(map.getZoom() + 1);
+    // Step 2: zoom +1, then cap at maxZoom
+    let newZoom = Math.min(map.getZoom() + 1, maxZoom);
+    map.setZoom(newZoom);
     // Step 3: wait for zoom to settle, then check pin
     google.maps.event.addListenerOnce(map, 'idle', () => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
@@ -969,6 +970,10 @@ async function go() {
         drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
+        // Cap aérienne zoom at 19
+        google.maps.event.addListenerOnce(mapA, 'idle', () => {
+          if (mapA.getZoom() > 19) mapA.setZoom(19);
+        });
 
         // === PLAN CADASTRAL: fit to parcelle bounds, cap zoom ===
         mapC.fitBounds(geojsonToBounds(parcelle.geometry));
@@ -1037,31 +1042,32 @@ async function doParticuliereStandard(bien) {
 
       if (size.max < 6) {
         // COMPACTE → montrer toute la commune + zoom +1
+        // Très petite (< 2km) → zoom max 18, sinon zoom max 16
+        const maxZoom = size.max < 2 ? 18 : 16;
         mapP.fitBounds(contourBounds);
-        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
-        console.log(communeName + ': compacte → contour + zoom +1');
+        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng, 0.10, maxZoom);
+        console.log(communeName + ': compacte → contour + zoom +1 (max ' + maxZoom + ')');
         return communeName;
       }
 
       if (size.max <= 12) {
-        // MOYENNE → viewport Google + zoom +1
+        // MOYENNE → viewport Google + zoom +1, max 16
         const viewport = await getGoogleViewport(communeName);
         if (viewport && !isViewportTooWide(viewport, contourBounds)) {
           mapP.fitBounds(viewport);
-          fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
-          console.log(communeName + ': moyenne → viewport + zoom +1');
+          fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng, 0.10, 16);
+          console.log(communeName + ': moyenne → viewport + zoom +1 (max 16)');
           return communeName;
         }
-        // Viewport rejeté → contour + zoom +1
         mapP.fitBounds(contourBounds);
-        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
-        console.log(communeName + ': moyenne → fallback contour + zoom +1');
+        fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng, 0.10, 16);
+        console.log(communeName + ': moyenne → fallback contour + zoom +1 (max 16)');
         return communeName;
       }
 
-      // ÉTENDUE (> 12 km) → centrer sur le bien, rayon 2.5 km
+      // ÉTENDUE (> 12 km) → centrer sur le bien, rayon 2.5 km, max 16
       mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 2.5));
-      fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng);
+      fitBoundsZoomThenEnsurePin(mapP, bien.lat, bien.lng, 0.10, 16);
       console.log(communeName + ': étendue (' + size.max.toFixed(0) + 'km) → rayon 2.5km autour du bien');
       return communeName;
     }
