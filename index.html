@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v38</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v39</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -690,10 +690,19 @@ function findCitiesForGeneraleV3(lat, lng) {
   return { cities, phase: 'P3: 2 villes > 150k' + (nearbyCities.length ? ' + ' + nearbyCities.map(c => c.nom).join(', ') + ' (< 50km)' : '') };
 }
 
-function citiesBounds(lat, lng, cities) {
+function citiesBounds(lat, lng, cities, padding = 0.15) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend({ lat, lng });
   cities.forEach(c => bounds.extend({ lat: c.lat, lng: c.lng }));
+
+  // Expand bounds by padding % on each side so fitBounds includes margin for all labels
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const h = ne.lat() - sw.lat();
+  const w = ne.lng() - sw.lng();
+  bounds.extend({ lat: ne.lat() + h * padding, lng: ne.lng() + w * padding });
+  bounds.extend({ lat: sw.lat() - h * padding, lng: sw.lng() - w * padding });
+
   return bounds;
 }
 
@@ -881,10 +890,8 @@ async function go() {
       modeLabel = 'proche de ' + top10.city.nom;
       console.log('Mode NEARBY: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
 
-      // GÉNÉRALE → bbox bien + big city
-      const gBounds = new google.maps.LatLngBounds();
-      gBounds.extend({ lat: bien.lat, lng: bien.lng });
-      gBounds.extend({ lat: top10.city.lat, lng: top10.city.lng });
+      // GÉNÉRALE → bbox bien + big city with 15% padding
+      const gBounds = citiesBounds(bien.lat, bien.lng, [top10.city]);
       const nearbyPoints = [{ lat: bien.lat, lng: bien.lng }, { lat: top10.city.lat, lng: top10.city.lng }];
       mapG.fitBounds(gBounds);
       ensurePointsVisible(mapG, nearbyPoints);
