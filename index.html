@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v49</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v50</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -276,7 +276,7 @@ function switchAlgoP(n) {
 }
 
 // ===== PIN ICON =====
-const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#E5007D"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
+const PIN_SVG = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="#FF6600"/><circle cx="12" cy="11" r="4.5" fill="white"/></svg>`)}`;
 
 // ===== IGN CADASTRE TILE OVERLAY =====
 function createCadastreOverlay() {
@@ -572,13 +572,13 @@ function detectTop10(lat, lng) {
 
 // ===== SPECIAL TERRITORIES =====
 const TERRITORIES = {
-  '2A': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
-  '2B': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
-  '971': { nom: 'Guadeloupe', bounds: { sw: { lat: 15.83, lng: -61.81 }, ne: { lat: 16.52, lng: -60.99 } }, zoomPlus: 0 },
-  '972': { nom: 'Martinique', bounds: { sw: { lat: 14.38, lng: -61.24 }, ne: { lat: 14.89, lng: -60.80 } }, zoomPlus: 1 },
+  '2A': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 0 },
+  '2B': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 0 },
+  '971': { nom: 'Guadeloupe', bounds: { sw: { lat: 15.83, lng: -61.81 }, ne: { lat: 16.52, lng: -60.99 } }, zoomPlus: 1 },
+  '972': { nom: 'Martinique', bounds: { sw: { lat: 14.38, lng: -61.24 }, ne: { lat: 14.89, lng: -60.80 } }, zoomPlus: 0 },
   '973': { nom: 'Guyane', bounds: { sw: { lat: 2.11, lng: -54.60 }, ne: { lat: 5.75, lng: -51.63 } }, zoomPlus: 0 },
   '974': { nom: 'La Réunion', bounds: { sw: { lat: -21.39, lng: 55.22 }, ne: { lat: -20.87, lng: 55.84 } }, zoomPlus: 0 },
-  '976': { nom: 'Mayotte', bounds: { sw: { lat: -13.01, lng: 44.99 }, ne: { lat: -12.63, lng: 45.31 } }, zoomPlus: 0 },
+  '976': { nom: 'Mayotte', bounds: { sw: { lat: -13.01, lng: 44.99 }, ne: { lat: -12.63, lng: 45.31 } }, zoomPlus: 1 },
 };
 
 function getTerritory(dept) {
@@ -671,7 +671,7 @@ function findCitiesForGeneraleV3(lat, lng) {
   return { cities, phase: 'P3: 2 villes > 150k' + (nearbyCities.length ? ' + ' + nearbyCities.map(c => c.nom).join(', ') + ' (< 50km)' : '') };
 }
 
-function citiesBounds(lat, lng, cities, padding = 0.15) {
+function citiesBounds(lat, lng, cities, padding = 0.10) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend({ lat, lng });
   cities.forEach(c => bounds.extend({ lat: c.lat, lng: c.lng }));
@@ -712,17 +712,25 @@ function checkAndPanForMargin(map, points, margin) {
   const sw = bounds.getSouthWest();
   const h = ne.lat() - sw.lat();
   const w = ne.lng() - sw.lng();
-  const mh = h * margin;
-  const mw = w * margin;
 
-  const allPoints = [...points];
+  // Primary points (pin, ref cities) get full margin
+  const primaryMarginH = h * margin;
+  const primaryMarginW = w * margin;
+
+  // TOP10 cities in viewport get reduced margin (5%) — just enough not to be clipped
+  const cityMargin = 0.05;
+  const cityMarginH = h * cityMargin;
+  const cityMarginW = w * cityMargin;
+
+  // Collect TOP10 cities near viewport (Générale only)
+  const cityPoints = [];
   if (map === mapG) {
     for (const c of TOP10_CITIES) {
       const buf = 0.05;
       if (c.lat >= sw.lat() - h * buf && c.lat <= ne.lat() + h * buf &&
           c.lng >= sw.lng() - w * buf && c.lng <= ne.lng() + w * buf) {
-        if (!allPoints.some(p => Math.abs(p.lat - c.lat) < 0.01 && Math.abs(p.lng - c.lng) < 0.01)) {
-          allPoints.push({ lat: c.lat, lng: c.lng });
+        if (!points.some(p => Math.abs(p.lat - c.lat) < 0.01 && Math.abs(p.lng - c.lng) < 0.01)) {
+          cityPoints.push({ lat: c.lat, lng: c.lng });
           console.log('Top10 in viewport: ' + c.nom);
         }
       }
@@ -731,15 +739,28 @@ function checkAndPanForMargin(map, points, margin) {
 
   let panLat = 0, panLng = 0;
 
-  for (const p of allPoints) {
+  // Primary points: full margin
+  for (const p of points) {
     const gapS = p.lat - sw.lat();
-    if (gapS < mh) panLat = Math.min(panLat, -(mh - gapS));
+    if (gapS < primaryMarginH) panLat = Math.min(panLat, -(primaryMarginH - gapS));
     const gapN = ne.lat() - p.lat;
-    if (gapN < mh) panLat = Math.max(panLat, (mh - gapN));
+    if (gapN < primaryMarginH) panLat = Math.max(panLat, (primaryMarginH - gapN));
     const gapW = p.lng - sw.lng();
-    if (gapW < mw) panLng = Math.min(panLng, -(mw - gapW));
+    if (gapW < primaryMarginW) panLng = Math.min(panLng, -(primaryMarginW - gapW));
     const gapE = ne.lng() - p.lng;
-    if (gapE < mw) panLng = Math.max(panLng, (mw - gapE));
+    if (gapE < primaryMarginW) panLng = Math.max(panLng, (primaryMarginW - gapE));
+  }
+
+  // TOP10 cities: reduced margin (don't override stronger pan from primary)
+  for (const p of cityPoints) {
+    const gapS = p.lat - sw.lat();
+    if (gapS < cityMarginH) panLat = Math.min(panLat, -(cityMarginH - gapS));
+    const gapN = ne.lat() - p.lat;
+    if (gapN < cityMarginH) panLat = Math.max(panLat, (cityMarginH - gapN));
+    const gapW = p.lng - sw.lng();
+    if (gapW < cityMarginW) panLng = Math.min(panLng, -(cityMarginW - gapW));
+    const gapE = ne.lng() - p.lng;
+    if (gapE < cityMarginW) panLng = Math.max(panLng, (cityMarginW - gapE));
   }
 
   if (panLat !== 0 || panLng !== 0) {
@@ -916,6 +937,7 @@ async function go() {
         const contourData = await fetchCommuneContour(bien.lat, bien.lng);
         if (contourData && contourData.contour) {
           drawCommuneContour(mapP, contourData.contour);
+          drawCommuneContour(mapG, contourData.contour);
         }
       } catch(e) { /* silent */ }
     }
