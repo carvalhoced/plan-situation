@@ -1058,10 +1058,10 @@ async function doParticuliereAlgo2(bien) {
 
     // Determine zoom max based on commune size
     const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
-    let zoomMax = 15; // ← was 16, now 15
+    let zoomMax = 15;
     if (contourBounds) {
       const size = communeSizeKm(contourBounds);
-      if (size.max < 2) zoomMax = 16; // ← was 18, now 16
+      if (size.max < 2) zoomMax = 16;
       console.log(communeName + ' algo2 bbox: ' + size.max.toFixed(1) + 'km → zoomMax ' + zoomMax);
     }
 
@@ -1072,38 +1072,27 @@ async function doParticuliereAlgo2(bien) {
       return await doParticuliereStandard(bien);
     }
 
-    // Distance between bien and centre-ville
-    const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
-    console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
+    // FitBounds on [bien, centre-ville]
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: bien.lat, lng: bien.lng });
+    bounds.extend({ lat: center.lat, lng: center.lng });
+    mapP.fitBounds(bounds);
 
-    if (distBienCentre < 1) {
-      // Bien is very close to centre-ville → just center on bien at zoomMax
-      mapP.setCenter({ lat: bien.lat, lng: bien.lng });
-      mapP.setZoom(zoomMax);
-      console.log(communeName + ': algo2 bien≈centre-ville → zoom direct ' + zoomMax);
-    } else {
-      // FitBounds on [bien, centre-ville]
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend({ lat: bien.lat, lng: bien.lng });
-      bounds.extend({ lat: center.lat, lng: center.lng });
-      mapP.fitBounds(bounds);
+    // After fitBounds settles → clamp zoom 13-zoomMax (idle chain)
+    google.maps.event.addListenerOnce(mapP, 'idle', () => {
+      let z = mapP.getZoom();
+      if (z > zoomMax) mapP.setZoom(zoomMax);
+      else if (z < 13) mapP.setZoom(13);
 
-      // After fitBounds settles → clamp zoom 13-zoomMax
+      // After zoom clamp settles → ensure both points have 20% margin
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
-        let z = mapP.getZoom();
-        if (z > zoomMax) mapP.setZoom(zoomMax);
-        else if (z < 13) mapP.setZoom(13);
-
-        // After zoom clamp settles → ensure both points have 20% margin
-        google.maps.event.addListenerOnce(mapP, 'idle', () => {
-          checkAndPanForMargin(mapP, [
-            { lat: bien.lat, lng: bien.lng },
-            { lat: center.lat, lng: center.lng }
-          ], 0.20);
-          console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
-        });
+        checkAndPanForMargin(mapP, [
+          { lat: bien.lat, lng: bien.lng },
+          { lat: center.lat, lng: center.lng }
+        ], 0.20);
+        console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
       });
-    }
+    });
 
   } catch(e) {
     console.warn('Particuliere algo2 failed:', e);
