@@ -1072,27 +1072,38 @@ async function doParticuliereAlgo2(bien) {
       return await doParticuliereStandard(bien);
     }
 
-    // FitBounds on [bien, centre-ville]
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend({ lat: bien.lat, lng: bien.lng });
-    bounds.extend({ lat: center.lat, lng: center.lng });
-    mapP.fitBounds(bounds);
+    // Distance between bien and centre-ville
+    const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
+    console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
-    // After fitBounds settles → clamp zoom 13-zoomMax
-    google.maps.event.addListenerOnce(mapP, 'idle', () => {
-      let z = mapP.getZoom();
-      if (z > zoomMax) mapP.setZoom(zoomMax);
-      else if (z < 13) mapP.setZoom(13);
+    if (distBienCentre < 1) {
+      // Bien is very close to centre-ville → just center on bien at zoomMax
+      mapP.setCenter({ lat: bien.lat, lng: bien.lng });
+      mapP.setZoom(zoomMax);
+      console.log(communeName + ': algo2 bien≈centre-ville → zoom direct ' + zoomMax);
+    } else {
+      // FitBounds on [bien, centre-ville]
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend({ lat: bien.lat, lng: bien.lng });
+      bounds.extend({ lat: center.lat, lng: center.lng });
+      mapP.fitBounds(bounds);
 
-      // After zoom clamp settles → ensure both points have 20% margin
+      // After fitBounds settles → clamp zoom 13-zoomMax
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
-        checkAndPanForMargin(mapP, [
-          { lat: bien.lat, lng: bien.lng },
-          { lat: center.lat, lng: center.lng }
-        ], 0.20);
-        console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
+        let z = mapP.getZoom();
+        if (z > zoomMax) mapP.setZoom(zoomMax);
+        else if (z < 13) mapP.setZoom(13);
+
+        // After zoom clamp settles → ensure both points have 20% margin
+        google.maps.event.addListenerOnce(mapP, 'idle', () => {
+          checkAndPanForMargin(mapP, [
+            { lat: bien.lat, lng: bien.lng },
+            { lat: center.lat, lng: center.lng }
+          ], 0.20);
+          console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
+        });
       });
-    });
+    }
 
   } catch(e) {
     console.warn('Particuliere algo2 failed:', e);
