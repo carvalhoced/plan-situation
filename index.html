@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v55</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v59</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -687,21 +687,20 @@ function citiesBounds(lat, lng, cities, padding = 0.10) {
 }
 
 function ensurePointsVisible(map, points, margin = 0.15) {
-  setTimeout(() => {
+  google.maps.event.addListenerOnce(map, 'idle', () => {
     checkAndPanForMargin(map, points, margin);
-  }, 1500);
+  });
 }
 
 function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.10) {
-  setTimeout(() => {
+  google.maps.event.addListenerOnce(map, 'idle', () => {
     map.setZoom(map.getZoom() + 1);
-    setTimeout(() => {
+    google.maps.event.addListenerOnce(map, 'idle', () => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
-      setTimeout(() => {
-        map.setOptions({ maxZoom: null });
-      }, 500);
-    }, 500);
-  }, 500);
+      // Release maxZoom so user can zoom manually
+      map.setOptions({ maxZoom: null });
+    });
+  });
 }
 
 function checkAndPanForMargin(map, points, margin) {
@@ -769,6 +768,122 @@ function checkAndPanForMargin(map, points, margin) {
     console.log('Margin pan: lat ' + panLat.toFixed(4) + ' lng ' + panLng.toFixed(4));
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANGULAR/.NET — ARCHITECTURE BACK/FRONT POUR LES PLANS DE SITUATION
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Dans le proto, TOUT est fait côté client (appels API + calcul + rendu).
+// En prod Angular/.NET, séparer en 2 couches :
+//
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ BACKEND .NET — Endpoint: POST /api/plans-situation                 │
+// │                                                                     │
+// │ Input:  { adresse: string }                                         │
+// │ Output: {                                                           │
+// │   bien: { lat, lng, display, dept },                                │
+// │   generale: {                                                       │
+// │     center: { lat, lng },                                           │
+// │     zoom: number,                                                   │
+// │     // OU bounds: { sw: {lat,lng}, ne: {lat,lng} }                  │
+// │     mode: 'inside' | 'nearby' | 'standard' | 'territoire',         │
+// │     refCities: [{ nom, lat, lng, dist }],                           │
+// │     phase: string                                                   │
+// │   },                                                                │
+// │   particuliere: {                                                   │
+// │     center: { lat, lng },                                           │
+// │     zoom: number,                                                   │
+// │     communeName: string,                                            │
+// │     contour: GeoJSON   // contour de la commune pour affichage      │
+// │   },                                                                │
+// │   aerienne: { center: { lat, lng }, zoom: 19 },                     │
+// │   cadastre: {                                                       │
+// │     center: { lat, lng },                                           │
+// │     zoom: 19,                                                       │
+// │     parcelle: GeoJSON,  // parcelle initiale                        │
+// │     ref: { section, numero, codeInsee, contenance }                 │
+// │   }                                                                 │
+// │ }                                                                   │
+// │                                                                     │
+// │ Appels serveur (parallélisables) :                                  │
+// │   1. BAN API → géocodage (lat, lng, dept)                           │
+// │   2. geo.api.gouv.fr → contour commune + arrondissement             │
+// │   3. Google Geocoder → centre-ville de la commune (Particulière)    │
+// │   4. IGN apicarto → parcelle cadastrale                             │
+// │   5. Calcul algo (pur code, pas d'appel externe) :                  │
+// │      - detectTop10(lat, lng) → mode inside/nearby/standard          │
+// │      - getTerritory(dept) → Corse, DOM-TOM                          │
+// │      - findCitiesForGeneraleV3(lat, lng) → P1/P2/P3                 │
+// │      - communeSizeKm(contour) → taille commune                      │
+// │      - Calcul du zoom optimal :                                     │
+// │        zoom = floor(log2(360 * viewportWidth /                      │
+// │               (boundsWidth * 256)))                                  │
+// │        Viewport fixe 4:3 (ex: 800x600 px)                           │
+// │      - Clamp zoom selon les règles :                                │
+// │        Particulière standard → 13-15                                │
+// │        Particulière commune < 2km → 13-16                           │
+// │        Aérienne → 19                                                │
+// │        Cadastre → 19                                                │
+// └─────────────────────────────────────────────────────────────────────┘
+//
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ FRONTEND ANGULAR — Composant MapViewer                              │
+// │                                                                     │
+// │ Le front reçoit le payload et fait UNIQUEMENT :                     │
+// │   1. map.setCenter(payload.generale.center)                         │
+// │   2. map.setZoom(payload.generale.zoom)                             │
+// │   3. Ajouter le marker (pin orange #FF6600)                         │
+// │   4. Dessiner le contour commune sur la Particulière                │
+// │   5. Dessiner la parcelle sur Aérienne + Cadastre                   │
+// │   6. Charger les tuiles IGN cadastre (overlay)                      │
+// │                                                                     │
+// │ PAS de fitBounds, PAS de idle chain, PAS de safety check.           │
+// │ Le zoom et le centre sont calculés par le back pour un viewport     │
+// │ 4:3 fixe → résultat identique sur mobile et desktop.                │
+// │                                                                     │
+// │ Pour la CAPTURE D'IMAGE (export PNG pour le rapport) :              │
+// │   - Attendre l'événement 'tilesloaded' (pas 'idle')                 │
+// │   - 'idle' = carte stabilisée (OK pour navigation)                  │
+// │   - 'tilesloaded' = tuiles rendues (obligatoire pour capture)       │
+// │   - Puis html2canvas ou Google Static Maps API                      │
+// │                                                                     │
+// │ Pour l'INTERACTION CADASTRE (sélection multi-parcelles) :           │
+// │   - Reste 100% front (clic → toggle parcelle)                       │
+// │   - Les parcelles du viewport sont chargées via IGN apicarto        │
+// │     au fur et à mesure que l'utilisateur navigue (zoom >= 18)       │
+// │   - La mise à jour de la vue aérienne (fitBounds sur sélection)     │
+// │     reste côté front, cappée à zoom 19 via idle listener            │
+// └─────────────────────────────────────────────────────────────────────┘
+//
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ RÈGLES MÉTIER À PORTER EN BACK (résumé)                             │
+// │                                                                     │
+// │ SITUATION GÉNÉRALE (algo 3) :                                       │
+// │   - INSIDE top10 (dist < radiusIn) → contour ville                  │
+// │   - NEARBY top10 (radiusIn < dist < 30km) → bbox bien↔ville +10%   │
+// │   - STANDARD :                                                      │
+// │     - Territoire spécial (Corse/DOM-TOM) → bounds territoire        │
+// │       Corse: zoomPlus +1, Martinique: +1                            │
+// │       Guadeloupe/Guyane/Réunion/Mayotte: +0                         │
+// │     - P1: top10 < 40km → bbox bien↔top10 +10%                      │
+// │     - P2: top10 40-100km → bbox bien↔top10↔ville>90k +10%          │
+// │     - P3: top10 > 100km → bbox bien↔2 villes>150k +10%             │
+// │   - Pin margin: 15% min du bord                                     │
+// │   - TOP10 dans viewport: 5% min du bord (ne pas pousser la pin)    │
+// │                                                                     │
+// │ SITUATION PARTICULIÈRE (algo 2) :                                   │
+// │   - Villes à arrondissements (Paris/Lyon/Marseille) :               │
+// │     → contour arrondissement + zoom+1, cap 16                       │
+// │   - Autres communes :                                               │
+// │     → fitBounds(bien, centre-ville commune)                         │
+// │     → zoom clamp 13-15 (standard), 13-16 (commune < 2km)           │
+// │     → margin 20% pour les 2 points                                  │
+// │                                                                     │
+// │ VUE AÉRIENNE : zoom 19, satellite, tilt 0                           │
+// │ PLAN CADASTRAL : zoom 19, tuiles IGN, parcelle auto-sélectionnée    │
+// └─────────────────────────────────────────────────────────────────────┘
+//
+// ═══════════════════════════════════════════════════════════════════════════
 
 // ===== MAIN =====
 async function go() {
@@ -998,6 +1113,31 @@ async function go() {
         mapA.setZoom(19);
       }
     }, 3000);
+
+    // SAFETY: ensure pin is visible on Générale et Particulière after everything settles
+    setTimeout(() => {
+      [mapG, mapP].forEach((map, i) => {
+        const label = i === 0 ? 'Générale' : 'Particulière';
+        const bounds = map.getBounds();
+        if (!bounds) return;
+        if (!bounds.contains({ lat: bien.lat, lng: bien.lng })) {
+          console.log('SAFETY PIN: ' + label + ' — pin hors viewport, recentrage');
+          map.panTo({ lat: bien.lat, lng: bien.lng });
+        } else {
+          // Pin is in viewport but check it has at least 10% margin
+          const ne = bounds.getNorthEast();
+          const sw = bounds.getSouthWest();
+          const h = ne.lat() - sw.lat();
+          const w = ne.lng() - sw.lng();
+          const margin = 0.10;
+          if (bien.lat - sw.lat() < h * margin || ne.lat() - bien.lat < h * margin ||
+              bien.lng - sw.lng() < w * margin || ne.lng() - bien.lng < w * margin) {
+            console.log('SAFETY PIN: ' + label + ' — pin trop proche du bord, pan');
+            checkAndPanForMargin(map, [{ lat: bien.lat, lng: bien.lng }], margin);
+          }
+        }
+      });
+    }, 4000);
 
   } catch(err) {
     setStatus('Erreur: ' + err.message, 'error');
