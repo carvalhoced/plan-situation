@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v45</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v46</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -945,7 +945,7 @@ async function go() {
 
         mapC.fitBounds(geojsonToBounds(parcelle.geometry));
         google.maps.event.addListenerOnce(mapC, 'idle', () => {
-          if (mapC.getZoom() > 18) mapC.setZoom(18);
+          if (mapC.getZoom() > 19) mapC.setZoom(19);
         });
 
         window._initialParcelId = `${section}-${numero}`;
@@ -957,7 +957,7 @@ async function go() {
         mapA.setCenter({ lat: bien.lat, lng: bien.lng });
         mapA.setZoom(19);
         mapC.setCenter({ lat: bien.lat, lng: bien.lng });
-        mapC.setZoom(18);
+        mapC.setZoom(19);
         document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée';
       }
     } catch(e) {
@@ -965,7 +965,7 @@ async function go() {
       mapA.setCenter({ lat: bien.lat, lng: bien.lng });
       mapA.setZoom(19);
       mapC.setCenter({ lat: bien.lat, lng: bien.lng });
-      mapC.setZoom(18);
+      mapC.setZoom(19);
     }
 
     showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
