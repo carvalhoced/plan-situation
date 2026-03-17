@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v54</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v55</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -572,13 +572,13 @@ function detectTop10(lat, lng) {
 
 // ===== SPECIAL TERRITORIES =====
 const TERRITORIES = {
-  '2A': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 0 },
-  '2B': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 0 },
-  '971': { nom: 'Guadeloupe', bounds: { sw: { lat: 15.83, lng: -61.81 }, ne: { lat: 16.52, lng: -60.99 } }, zoomPlus: 1 },
-  '972': { nom: 'Martinique', bounds: { sw: { lat: 14.38, lng: -61.24 }, ne: { lat: 14.89, lng: -60.80 } }, zoomPlus: 0 },
+  '2A': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
+  '2B': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
+  '971': { nom: 'Guadeloupe', bounds: { sw: { lat: 15.83, lng: -61.81 }, ne: { lat: 16.52, lng: -60.99 } }, zoomPlus: 0 },
+  '972': { nom: 'Martinique', bounds: { sw: { lat: 14.38, lng: -61.24 }, ne: { lat: 14.89, lng: -60.80 } }, zoomPlus: 1 },
   '973': { nom: 'Guyane', bounds: { sw: { lat: 2.11, lng: -54.60 }, ne: { lat: 5.75, lng: -51.63 } }, zoomPlus: 0 },
   '974': { nom: 'La Réunion', bounds: { sw: { lat: -21.39, lng: 55.22 }, ne: { lat: -20.87, lng: 55.84 } }, zoomPlus: 0 },
-  '976': { nom: 'Mayotte', bounds: { sw: { lat: -13.01, lng: 44.99 }, ne: { lat: -12.63, lng: 45.31 } }, zoomPlus: 1 },
+  '976': { nom: 'Mayotte', bounds: { sw: { lat: -13.01, lng: 44.99 }, ne: { lat: -12.63, lng: 45.31 } }, zoomPlus: 0 },
 };
 
 function getTerritory(dept) {
