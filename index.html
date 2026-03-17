@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v50</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v52</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -440,6 +440,40 @@ function drawCommuneContour(map, geojson) {
     fillOpacity: 0,
     map: map,
   });
+}
+
+// ===== FRANCE METROPOLITAN BORDER (simplified) =====
+let _franceBorderCache = null;
+async function drawFranceBorder(map) {
+  try {
+    if (!_franceBorderCache) {
+      // Fetch simplified France contour from geo.api.gouv.fr (all regions combined)
+      const res = await fetch('https://geo.api.gouv.fr/regions?fields=contour');
+      if (!res.ok) return;
+      const regions = await res.json();
+      _franceBorderCache = regions.filter(r => r.contour).map(r => r.contour);
+    }
+    _franceBorderCache.forEach(contour => {
+      const allRings = contour.type === 'MultiPolygon'
+        ? contour.coordinates.map(poly => poly[0])
+        : [contour.coordinates[0]];
+      allRings.forEach(ring => {
+        const path = ring.map(c => ({ lat: c[1], lng: c[0] }));
+        new google.maps.Polygon({
+          paths: path,
+          strokeColor: '#521DA5',
+          strokeOpacity: 0.6,
+          strokeWeight: 1.5,
+          fillColor: '#521DA5',
+          fillOpacity: 0.03,
+          map: map,
+        });
+      });
+    });
+    console.log('France border drawn (' + _franceBorderCache.length + ' regions)');
+  } catch(e) {
+    console.warn('France border failed:', e);
+  }
 }
 
 // ===== FETCH PARCELLE CADASTRALE =====
@@ -937,10 +971,12 @@ async function go() {
         const contourData = await fetchCommuneContour(bien.lat, bien.lng);
         if (contourData && contourData.contour) {
           drawCommuneContour(mapP, contourData.contour);
-          drawCommuneContour(mapG, contourData.contour);
         }
       } catch(e) { /* silent */ }
     }
+
+    // Draw France border on Générale
+    drawFranceBorder(mapG);
 
     mapA.setTilt(0);
     let cadastreRef = '';
@@ -1483,6 +1519,9 @@ function updateAerienneFromSelection() {
     bounds.union(b);
   });
   mapA.fitBounds(bounds);
+  google.maps.event.addListenerOnce(mapA, 'idle', () => {
+    if (mapA.getZoom() > 19) mapA.setZoom(19);
+  });
 }
 
 function quickTest(address) {
