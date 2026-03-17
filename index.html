@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v53</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v54</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -213,17 +213,17 @@
   <div class="map-card">
     <div class="map-label">Situation GÉNÉRALE</div>
     <div class="algo-tabs" id="algoTabsG">
-      <button class="algo-tab active" onclick="switchAlgoG(1)">Algo 1 — Top 10</button>
+      <button class="algo-tab" onclick="switchAlgoG(1)">Algo 1 — Top 10</button>
       <button class="algo-tab" onclick="switchAlgoG(2)">Algo 2 — Progressif</button>
-      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Villes > 150k</button>
+      <button class="algo-tab active" onclick="switchAlgoG(3)">Algo 3 — Villes > 150k</button>
     </div>
     <div class="map-container" id="mapGeneral"></div>
   </div>
   <div class="map-card">
     <div class="map-label">Situation PARTICULIÈRE</div>
     <div class="algo-tabs" id="algoTabsP">
-      <button class="algo-tab active" onclick="switchAlgoP(1)">Algo 1 — Commune</button>
-      <button class="algo-tab" onclick="switchAlgoP(2)">Algo 2 — Bien ↔ Centre-ville</button>
+      <button class="algo-tab" onclick="switchAlgoP(1)">Algo 1 — Commune</button>
+      <button class="algo-tab active" onclick="switchAlgoP(2)">Algo 2 — Bien ↔ Centre-ville</button>
     </div>
     <div class="map-container" id="mapParticuliere"></div>
   </div>
@@ -258,8 +258,8 @@ let markerG, markerP, markerA;
 let currentPolygonsA = [];
 
 // Current algo selections
-let currentAlgoG = '1';
-let currentAlgoP = '1';
+let currentAlgoG = '3';
+let currentAlgoP = '2';
 let lastAddress = '';
 let lastBienData = null;
 
