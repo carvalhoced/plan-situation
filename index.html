@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v44</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v45</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -312,7 +312,6 @@ function initMaps() {
   mapA = new google.maps.Map(document.getElementById('mapAerienne'), {
     ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
   });
-  // Cadastre: IGN Plan as base map (not overlay on Google)
   const ignBase = new google.maps.ImageMapType({
     getTileUrl: function(coord, zoom) {
       return 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX=' + zoom + '&TILEROW=' + coord.y + '&TILECOL=' + coord.x;
@@ -331,13 +330,10 @@ function initMaps() {
   });
   mapC.mapTypes.set('IGN', ignBase);
   mapC.setMapTypeId('IGN');
-  // Add cadastre parcels on top
   mapC.overlayMapTypes.push(createCadastreOverlay());
 
-  // Load parcels with debounce on map move
   let cadastreIdleTimer = null;
   mapC.addListener('idle', () => {
-    // Live zoom display
     const zEl = document.getElementById('cadastreZoomLevel');
     if (zEl) zEl.textContent = mapC.getZoom();
 
@@ -346,7 +342,7 @@ function initMaps() {
       if (mapC.getZoom() >= 18) {
         loadParcellesInViewport();
       }
-    }, 400); // wait 400ms after last move
+    }, 400);
   });
 }
 
@@ -380,7 +376,6 @@ async function geocode(address) {
   const f = data.features[0];
   const coords = f.geometry.coordinates;
   const props = f.properties || {};
-  // Extract department code from context (e.g. "2A, Corse-du-Sud, Corse" → "2A")
   const dept = props.context ? props.context.split(',')[0].trim() : '';
   return { lat: coords[1], lng: coords[0], display: props.label, dept };
 }
@@ -399,7 +394,6 @@ function geojsonToBounds(geojson) {
   const bounds = new google.maps.LatLngBounds();
   function addCoords(coords) {
     if (typeof coords[0] === 'number') {
-      // [lng, lat]
       bounds.extend({ lat: coords[1], lng: coords[0] });
     } else {
       coords.forEach(c => addCoords(c));
@@ -430,8 +424,7 @@ function boundsFromRadius(lat, lng, radiusKm) {
   return bounds;
 }
 
-
-// ===== DRAW COMMUNE CONTOUR (dark gray, visible) =====
+// ===== DRAW COMMUNE CONTOUR =====
 function drawCommuneContour(map, geojson) {
   const coords = geojson.type === 'MultiPolygon'
     ? geojson.coordinates[0][0]
@@ -449,10 +442,9 @@ function drawCommuneContour(map, geojson) {
   });
 }
 
-// ===== FETCH PARCELLE CADASTRALE (IGN API Carto) =====
+// ===== FETCH PARCELLE CADASTRALE =====
 async function fetchParcelleCadastre(lat, lng) {
-  // Tiny polygon for precise parcel detection at exact coordinates
-  const d = 0.0001; // ~10m
+  const d = 0.0001;
   const geom = JSON.stringify({
     type: 'Polygon',
     coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
@@ -506,7 +498,6 @@ async function fetchCommuneContour(lat, lng) {
   return data[0];
 }
 
-
 // ===== MAJOR FRENCH CITIES =====
 const MAJOR_CITIES = [
   { nom:'Paris', lat:48.8566, lng:2.3522, pop:2165423 },
@@ -552,7 +543,6 @@ const MAJOR_CITIES = [
   { nom:'Annecy', lat:45.8992, lng:6.1294, pop:131375 },
 ];
 
-// Top 10 French cities only
 const TOP10_CITIES = [
   { nom:'Paris', lat:48.8566, lng:2.3522, pop:2175000, radiusIn: 12 },
   { nom:'Marseille', lat:43.2965, lng:5.3698, pop:873000, radiusIn: 10 },
@@ -566,11 +556,8 @@ const TOP10_CITIES = [
   { nom:'Lille', lat:50.6292, lng:3.0573, pop:236000, radiusIn: 7 },
 ];
 
-// Detect relationship to a top-10 city
-// Returns { city, mode: 'inside' | 'nearby' } or null
 function detectTop10(lat, lng) {
-  const NEARBY_RADIUS = 30; // km
-
+  const NEARBY_RADIUS = 30;
   for (const c of TOP10_CITIES) {
     const dist = haversine(lat, lng, c.lat, c.lng);
     if (dist <= c.radiusIn) {
@@ -583,7 +570,7 @@ function detectTop10(lat, lng) {
   return null;
 }
 
-// ===== SPECIAL TERRITORIES (detected by department code from BAN) =====
+// ===== SPECIAL TERRITORIES =====
 const TERRITORIES = {
   '2A': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
   '2B': { nom: 'Corse', bounds: { sw: { lat: 41.38, lng: 8.57 }, ne: { lat: 43.03, lng: 9.57 } }, zoomPlus: 1 },
@@ -599,7 +586,6 @@ function getTerritory(dept) {
 }
 
 function findCitiesForGenerale(lat, lng) {
-  // 1. Nearest top-10 city within 150km → use only that
   const top10WithDist = TOP10_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
   })).filter(c => c.dist > 5 && c.dist <= 150)
@@ -609,7 +595,6 @@ function findCitiesForGenerale(lat, lng) {
     return { cities: [top10WithDist[0]], phase: 'top10 < 150km' };
   }
 
-  // 2. No top-10 nearby → 2 nearest metropoles > 100k
   const cities = MAJOR_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
   })).filter(c => c.dist > 5 && c.pop >= 100000)
@@ -630,12 +615,10 @@ function findCitiesForGeneraleV2(lat, lng) {
 
   const nearestTop10 = top10WithDist.length > 0 ? top10WithDist[0] : null;
 
-  // Phase 1: Top 10 < 50km → just that city, tight framing
   if (nearestTop10 && nearestTop10.dist < 50) {
     return { cities: [nearestTop10], phase: 'P1: top10 < 50km' };
   }
 
-  // Phase 2: Top 10 50-100km → that top10 + nearest city > 50k
   if (nearestTop10 && nearestTop10.dist <= 100) {
     const nearby50k = allCitiesWithDist
       .filter(c => c.pop >= 50000 && c.nom !== nearestTop10.nom)
@@ -644,14 +627,13 @@ function findCitiesForGeneraleV2(lat, lng) {
     return { cities, phase: 'P2: top10 < 100km + ville > 50k' };
   }
 
-  // Phase 3: Top 10 > 100km or absent → 2 nearest reference cities (top10 or >100k)
   const refCities = allCitiesWithDist
     .filter(c => c.pop >= 100000 || TOP10_CITIES.some(t => t.nom === c.nom))
     .slice(0, 2);
   return { cities: refCities, phase: 'P3: 2 villes référence' };
 }
 
-// ===== ALGO 3 — Comme algo 2 mais villes > 150k =====
+// ===== ALGO 3 — Comme algo 2 mais P1 à 40km et P3 villes > 150k =====
 function findCitiesForGeneraleV3(lat, lng) {
   const top10WithDist = TOP10_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
@@ -663,12 +645,12 @@ function findCitiesForGeneraleV3(lat, lng) {
 
   const nearestTop10 = top10WithDist.length > 0 ? top10WithDist[0] : null;
 
-  // Phase 1: Top 10 < 50km → just that city
-  if (nearestTop10 && nearestTop10.dist < 50) {
-    return { cities: [nearestTop10], phase: 'P1: top10 < 50km' };
+  // Phase 1: Top 10 < 40km → just that city (was 50km)
+  if (nearestTop10 && nearestTop10.dist < 40) {
+    return { cities: [nearestTop10], phase: 'P1: top10 < 40km' };
   }
 
-  // Phase 2: Top 10 50-100km → that top10 + nearest city > 50k
+  // Phase 2: Top 10 40-100km → that top10 + nearest city > 50k
   if (nearestTop10 && nearestTop10.dist <= 100) {
     const nearby50k = allCitiesWithDist
       .filter(c => c.pop >= 50000 && c.nom !== nearestTop10.nom)
@@ -682,7 +664,6 @@ function findCitiesForGeneraleV3(lat, lng) {
     .filter(c => c.pop >= 150000 || TOP10_CITIES.some(t => t.nom === c.nom))
     .slice(0, 2);
 
-  // Bonus: add any city > 100k within 50km (not already in list)
   const nearbyCities = allCitiesWithDist
     .filter(c => c.pop >= 100000 && c.dist < 50 && !refCities.some(r => r.nom === c.nom));
   const cities = [...refCities, ...nearbyCities];
@@ -695,7 +676,6 @@ function citiesBounds(lat, lng, cities, padding = 0.15) {
   bounds.extend({ lat, lng });
   cities.forEach(c => bounds.extend({ lat: c.lat, lng: c.lng }));
 
-  // Expand bounds by padding % on each side so fitBounds includes margin for all labels
   const ne = bounds.getNorthEast();
   const sw = bounds.getSouthWest();
   const h = ne.lat() - sw.lat();
@@ -706,20 +686,17 @@ function citiesBounds(lat, lng, cities, padding = 0.15) {
   return bounds;
 }
 
-// Ensure all points have margin — waits for map to fully settle
 function ensurePointsVisible(map, points, margin = 0.15) {
   setTimeout(() => {
     checkAndPanForMargin(map, points, margin);
   }, 1500);
 }
 
-// Zoom +1 after fitBounds, then ensure pin visible, then release maxZoom
 function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.10) {
   setTimeout(() => {
     map.setZoom(map.getZoom() + 1);
     setTimeout(() => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
-      // Release maxZoom so user can zoom manually
       setTimeout(() => {
         map.setOptions({ maxZoom: null });
       }, 500);
@@ -727,7 +704,6 @@ function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.10) {
   }, 500);
 }
 
-// Core margin check + pan logic (shared)
 function checkAndPanForMargin(map, points, margin) {
   const bounds = map.getBounds();
   if (!bounds) return;
@@ -739,7 +715,6 @@ function checkAndPanForMargin(map, points, margin) {
   const mh = h * margin;
   const mw = w * margin;
 
-  // Also check TOP10 cities near the viewport (only for Générale)
   const allPoints = [...points];
   if (map === mapG) {
     for (const c of TOP10_CITIES) {
@@ -784,21 +759,17 @@ async function go() {
   setStatus('Géocodage…', 'loading');
 
   try {
-    // 1. Geocode
     const bien = await geocode(address);
     lastAddress = address;
     lastBienData = bien;
     setStatus(`✓ ${bien.display} — récupération des contours…`, 'loading');
 
-    // 2. Init maps
     initMaps();
 
-    // Clear old markers
     if (markerG) markerG.setMap(null);
     if (markerP) markerP.setMap(null);
     if (markerA) markerA.setMap(null);
 
-    // Detect relationship to top-10 city
     const top10 = detectTop10(bien.lat, bien.lng);
     let gCities = [];
     let communeName = '?';
@@ -806,11 +777,9 @@ async function go() {
     let algoPhase = '';
 
     if (top10 && top10.mode === 'inside') {
-      // ===== INSIDE A TOP-10 CITY =====
       modeLabel = 'dans ' + top10.city.nom;
       console.log('Mode INSIDE: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
 
-      // GÉNÉRALE → contour of the big city
       try {
         const cityCommune = await fetchCommuneContour(top10.city.lat, top10.city.lng);
         if (cityCommune && cityCommune.contour) {
@@ -826,7 +795,6 @@ async function go() {
       ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
-      // PARTICULIÈRE → arrondissement (Paris/Lyon/Marseille) or neighbourhood
       const citiesWithArrondissements = ['Paris', 'Marseille', 'Lyon'];
       if (citiesWithArrondissements.includes(top10.city.nom)) {
         mapP.setOptions({ maxZoom: 16 });
@@ -852,7 +820,6 @@ async function go() {
           mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.2));
         }
       } else {
-        // Autres grandes villes sans arrondissements
         if (currentAlgoP === '2') {
           communeName = await doParticuliereAlgo2(bien);
         } else {
@@ -886,29 +853,24 @@ async function go() {
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else if (top10 && top10.mode === 'nearby') {
-      // ===== NEAR A TOP-10 CITY =====
       modeLabel = 'proche de ' + top10.city.nom;
       console.log('Mode NEARBY: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
 
-      // GÉNÉRALE → bbox bien + big city with 15% padding
       const gBounds = citiesBounds(bien.lat, bien.lng, [top10.city]);
       const nearbyPoints = [{ lat: bien.lat, lng: bien.lng }, { lat: top10.city.lat, lng: top10.city.lng }];
       mapG.fitBounds(gBounds);
       ensurePointsVisible(mapG, nearbyPoints);
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
-      // PARTICULIÈRE
       communeName = (currentAlgoP === '2') ? await doParticuliereAlgo2(bien) : await doParticuliereStandard(bien);
       markerP = addMarker(mapP, bien.lat, bien.lng);
 
     } else {
-      // ===== STANDARD (no top-10 nearby) =====
       modeLabel = 'standard';
       const selectedAlgo = currentAlgoG;
       const territory = getTerritory(bien.dept);
 
       if (territory) {
-        // TERRITOIRE SPÉCIAL (Corse, DOM-TOM) → cadrer sur le territoire
         modeLabel = territory.nom;
         const terrBounds = new google.maps.LatLngBounds(
           territory.bounds.sw,
@@ -922,7 +884,6 @@ async function go() {
         }
         ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
       } else {
-        // GÉNÉRALE — use selected algo
         const result = (selectedAlgo === '3')
           ? findCitiesForGeneraleV3(bien.lat, bien.lng)
           : (selectedAlgo === '2')
@@ -944,13 +905,10 @@ async function go() {
       }
       markerG = addMarker(mapG, bien.lat, bien.lng);
 
-      // PARTICULIÈRE
       communeName = (currentAlgoP === '2') ? await doParticuliereAlgo2(bien) : await doParticuliereStandard(bien);
       markerP = addMarker(mapP, bien.lat, bien.lng);
     }
 
-    // ===== DRAW COMMUNE CONTOUR on Particulière =====
-    // Skip only for arrondissement cities (Paris/Lyon/Marseille) — they draw the arrondissement contour instead
     const arrCities = ['Paris', 'Marseille', 'Lyon'];
     const skipContour = top10 && top10.mode === 'inside' && arrCities.includes(top10.city.nom);
     if (!skipContour) {
@@ -962,11 +920,9 @@ async function go() {
       } catch(e) { /* silent */ }
     }
 
-    // ===== AÉRIENNE + PLAN CADASTRAL =====
     mapA.setTilt(0);
     let cadastreRef = '';
 
-    // Clear any previous polygons
     clearPolygons(currentPolygonsA);
     clearViewportParcels();
 
@@ -980,25 +936,19 @@ async function go() {
         const codeInsee = props.code_insee || props.commune || '';
         cadastreRef = `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee}`;
 
-        // === AÉRIENNE: parcelle contour + fit ===
         drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
         const parcelleBounds = geojsonToBounds(parcelle.geometry);
         mapA.fitBounds(parcelleBounds);
-        // Cap aérienne zoom at 19
         google.maps.event.addListenerOnce(mapA, 'idle', () => {
           if (mapA.getZoom() > 19) mapA.setZoom(19);
         });
 
-        // === PLAN CADASTRAL: fit to parcelle bounds, cap zoom ===
         mapC.fitBounds(geojsonToBounds(parcelle.geometry));
         google.maps.event.addListenerOnce(mapC, 'idle', () => {
           if (mapC.getZoom() > 18) mapC.setZoom(18);
         });
 
-        // Store initial parcel ID — viewport loader will select it
         window._initialParcelId = `${section}-${numero}`;
-
-        // Load nearby parcels immediately (150m radius around bien)
         loadParcellesAroundPoint(bien.lat, bien.lng);
 
         document.getElementById('cadastreRef').textContent = cadastreRef;
@@ -1018,11 +968,9 @@ async function go() {
       mapC.setZoom(18);
     }
 
-    // ===== ALGO DETAILS =====
     showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
     setStatus(address + ' — dept: ' + (bien.dept || '?') + ' — mode: ' + modeLabel, '');
 
-    // Safety: final zoom cap after everything settles
     setTimeout(() => {
       if (mapA.getZoom() > 19) {
         console.log('SAFETY CAP Aérienne: ' + mapA.getZoom() + ' → 19');
@@ -1047,10 +995,9 @@ function communeSizeKm(bounds) {
   return { width, height, max: Math.max(width, height) };
 }
 
-// ===== STANDARD PARTICULIÈRE LOGIC (shared by nearby + standard) =====
+// ===== STANDARD PARTICULIÈRE LOGIC =====
 async function doParticuliereStandard(bien) {
   let communeName = '?';
-  // Cap zoom at 16 for algo 1 — released in zoomPlusThenEnsurePin
   mapP.setOptions({ maxZoom: 16 });
   try {
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
@@ -1065,7 +1012,6 @@ async function doParticuliereStandard(bien) {
       console.log(communeName + ' bbox: ' + size.width.toFixed(1) + 'km × ' + size.height.toFixed(1) + 'km (max ' + size.max.toFixed(1) + 'km)');
 
       if (size.max < 6) {
-        // COMPACTE → montrer toute la commune + zoom +1
         mapP.fitBounds(contourBounds);
         zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
         console.log(communeName + ': compacte → contour + zoom +1');
@@ -1073,7 +1019,6 @@ async function doParticuliereStandard(bien) {
       }
 
       if (size.max <= 12) {
-        // MOYENNE → viewport Google + zoom +1, max 16
         const viewport = await getGoogleViewport(communeName);
         if (viewport && !isViewportTooWide(viewport, contourBounds)) {
           mapP.fitBounds(viewport);
@@ -1087,14 +1032,12 @@ async function doParticuliereStandard(bien) {
         return communeName;
       }
 
-      // ÉTENDUE (> 12 km) → centrer sur le bien, rayon 2.5 km, max 16
       mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 2.5));
       zoomPlusThenEnsurePin(mapP, bien.lat, bien.lng);
       console.log(communeName + ': étendue (' + size.max.toFixed(0) + 'km) → rayon 2.5km autour du bien');
       return communeName;
     }
 
-    // No contour → fallback radius
     mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
     console.log(communeName + ': pas de contour → rayon 1.5km');
   } catch(e) {
@@ -1115,10 +1058,10 @@ async function doParticuliereAlgo2(bien) {
 
     // Determine zoom max based on commune size
     const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
-    let zoomMax = 16;
+    let zoomMax = 15; // ← was 16, now 15
     if (contourBounds) {
       const size = communeSizeKm(contourBounds);
-      if (size.max < 2) zoomMax = 18;
+      if (size.max < 2) zoomMax = 16; // ← was 18, now 16
       console.log(communeName + ' algo2 bbox: ' + size.max.toFixed(1) + 'km → zoomMax ' + zoomMax);
     }
 
@@ -1157,20 +1100,19 @@ async function doParticuliereAlgo2(bien) {
   }
   return communeName;
 }
+
 function isViewportTooWide(viewport, contourBounds) {
-  const MAX_OVERFLOW_RATIO = 0.10; // 10% of contour size
+  const MAX_OVERFLOW_RATIO = 0.10;
   const vNE = viewport.getNorthEast();
   const vSW = viewport.getSouthWest();
   const cNE = contourBounds.getNorthEast();
   const cSW = contourBounds.getSouthWest();
 
-  // Contour dimensions in km
   const contourH = haversine(cSW.lat(), 0, cNE.lat(), 0);
   const contourW = haversine(0, cSW.lng(), 0, cNE.lng());
   const maxGapH = contourH * MAX_OVERFLOW_RATIO;
   const maxGapW = contourW * MAX_OVERFLOW_RATIO;
 
-  // Only count overflow if viewport EXTENDS BEYOND contour (not if it's inside)
   const gapNorth = vNE.lat() > cNE.lat() ? haversine(cNE.lat(), 0, vNE.lat(), 0) : 0;
   const gapSouth = vSW.lat() < cSW.lat() ? haversine(cSW.lat(), 0, vSW.lat(), 0) : 0;
   const gapEast  = vNE.lng() > cNE.lng() ? haversine(0, cNE.lng(), 0, vNE.lng()) : 0;
@@ -1183,8 +1125,6 @@ function isViewportTooWide(viewport, contourBounds) {
   return tooWide;
 }
 
-// Google Geocoder: get viewport bounds for a place name
-// Google Geocoder: get viewport bounds for a place name (callback-based, wrapped in Promise)
 function getGoogleViewport(placeName) {
   return new Promise((resolve) => {
     const geocoder = new google.maps.Geocoder();
@@ -1201,12 +1141,10 @@ function getGoogleViewport(placeName) {
   });
 }
 
-// Google Geocoder: get centre-ville location with lat/lng bias to avoid homonyms
 function getGoogleCenterLocation(placeName, bienLat, bienLng) {
   return new Promise((resolve) => {
     const geocoder = new google.maps.Geocoder();
-    // Use bien coordinates as bias to disambiguate (e.g. Saint-Denis Réunion vs Île-de-France)
-    const biasRadius = 0.5; // ~50km
+    const biasRadius = 0.5;
     const searchBounds = new google.maps.LatLngBounds(
       { lat: bienLat - biasRadius, lng: bienLng - biasRadius },
       { lat: bienLat + biasRadius, lng: bienLng + biasRadius }
@@ -1223,7 +1161,6 @@ function getGoogleCenterLocation(placeName, bienLat, bienLng) {
     });
   });
 }
-
 
 function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase) {
   lastBienData = bien;
@@ -1273,7 +1210,6 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreR
     <p><span class="value">${cadastreRef || '—'}</span></p>
     <p>Zoom: <span class="value" id="zoomC">…</span></p>`;
 
-  // Live zoom updates for all 4 maps
   const updateZooms = () => {
     const zG = document.getElementById('zoomG');
     const zP = document.getElementById('zoomP');
@@ -1292,7 +1228,6 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreR
   mapC.addListener('idle', updateZooms);
 }
 
-// ===== CAPTURE via Static Maps API =====
 document.getElementById('addressInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') go();
 });
@@ -1323,9 +1258,8 @@ function drawTrackedPolygon(map, feature, color, trackArr) {
   trackArr.push(poly);
 }
 
-// Viewport parcels
 let viewportParcels = [];
-let selectedParcels = []; // { polygon, feature } — multi-selection
+let selectedParcels = [];
 let isLoadingParcels = false;
 let loadedParcelIds = new Set();
 
@@ -1337,9 +1271,8 @@ function clearViewportParcels() {
   document.getElementById('cadastreList').innerHTML = '';
 }
 
-// Load parcels in a small radius around a point (for initial load)
 async function loadParcellesAroundPoint(lat, lng) {
-  const d = 0.0015; // ~150m in degrees
+  const d = 0.0015;
   const geom = JSON.stringify({
     type: 'Polygon',
     coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
@@ -1347,7 +1280,6 @@ async function loadParcellesAroundPoint(lat, lng) {
   await loadParcellesFromGeom(geom);
 }
 
-// Load parcels from viewport bounds (for navigation)
 async function loadParcellesInViewport() {
   const bounds = mapC.getBounds();
   if (!bounds) return;
@@ -1360,7 +1292,6 @@ async function loadParcellesInViewport() {
   await loadParcellesFromGeom(geom);
 }
 
-// Shared logic: fetch parcels in a geom and add interactive polygons
 async function loadParcellesFromGeom(geom) {
   if (isLoadingParcels) return;
   isLoadingParcels = true;
@@ -1385,7 +1316,6 @@ async function loadParcellesFromGeom(geom) {
         : feature.geometry.coordinates[0];
       const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
 
-      // Auto-select initial parcel
       const isInitial = (window._initialParcelId && `${props.section}-${props.numero}` === window._initialParcelId);
 
       const polygon = new google.maps.Polygon({
@@ -1409,7 +1339,6 @@ async function loadParcellesFromGeom(geom) {
         window._initialParcelId = null;
       }
 
-      // Hover
       polygon.addListener('mouseover', () => {
         if (!polygon._selected) {
           polygon.setOptions({
@@ -1444,10 +1373,8 @@ async function loadParcellesFromGeom(geom) {
   isLoadingParcels = false;
 }
 
-// ===== TOGGLE PARCELLE (multi-select) =====
 function toggleParcelle(polygon, feature) {
   if (polygon._selected) {
-    // Deselect
     polygon._selected = false;
     polygon.setOptions({
       strokeColor: 'transparent', strokeOpacity: 0, strokeWeight: 0,
@@ -1455,7 +1382,6 @@ function toggleParcelle(polygon, feature) {
     });
     selectedParcels = selectedParcels.filter(sp => sp.polygon !== polygon);
   } else {
-    // Select
     polygon._selected = true;
     polygon.setOptions({
       strokeColor: '#E5007D', strokeOpacity: 0.9, strokeWeight: 3,
@@ -1477,7 +1403,6 @@ function updateCadastreRefDisplay() {
     return;
   }
 
-  // Summary line
   const sections = {};
   selectedParcels.forEach(sp => {
     const p = sp.feature.properties || {};
@@ -1491,12 +1416,11 @@ function updateCadastreRefDisplay() {
   const count = selectedParcels.length > 1 ? ` (${selectedParcels.length} parcelles)` : '';
   document.getElementById('cadastreRef').textContent = parts.join(' | ') + count;
 
-  // Parcels table
   let totalSurface = 0;
   let rows = '';
   selectedParcels.forEach(sp => {
     const p = sp.feature.properties || {};
-    const surface = p.contenance || 0; // m²
+    const surface = p.contenance || 0;
     totalSurface += surface;
     const surfaceDisplay = surface > 0
       ? (surface >= 10000 ? (surface / 10000).toFixed(2) + ' ha' : surface.toLocaleString('fr-FR') + ' m²')
@@ -1508,7 +1432,6 @@ function updateCadastreRefDisplay() {
     </tr>`;
   });
 
-  // Total row if multiple
   let totalRow = '';
   if (selectedParcels.length > 1) {
     const totalDisplay = totalSurface >= 10000
