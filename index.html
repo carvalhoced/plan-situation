@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v59</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v61</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -233,6 +233,10 @@
   </div>
   <div class="map-card">
     <div class="map-label">Plan CADASTRAL</div>
+    <div class="algo-tabs" id="algoTabsCadastre">
+      <button class="algo-tab active" onclick="switchCadastreGeo('ban')">Géoloc BAN</button>
+      <button class="algo-tab" onclick="switchCadastreGeo('google')">Géoloc Google</button>
+    </div>
     <div class="map-container" id="mapCadastre"></div>
     <div class="cadastre-ref" id="cadastreRef"></div>
     <div class="cadastre-list" id="cadastreList"></div>
@@ -273,6 +277,76 @@ function switchAlgoP(n) {
   currentAlgoP = '' + n;
   document.querySelectorAll('#algoTabsP .algo-tab').forEach((t, i) => t.classList.toggle('active', i === n - 1));
   if (lastAddress) go();
+}
+
+let currentCadastreGeo = 'ban';
+
+async function switchCadastreGeo(source) {
+  currentCadastreGeo = source;
+  document.querySelectorAll('#algoTabsCadastre .algo-tab').forEach((t, i) => t.classList.toggle('active', i === (source === 'ban' ? 0 : 1)));
+  if (!lastBienData || !lastAddress) return;
+
+  let lat = lastBienData.lat;
+  let lng = lastBienData.lng;
+
+  if (source === 'google') {
+    // Re-geocode with Google
+    const loc = await new Promise((resolve) => {
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode({ address: lastAddress }, function(results, status) {
+        if (status === 'OK' && results[0]) {
+          const l = results[0].geometry.location;
+          console.log('Google geocode:', l.lat().toFixed(6), l.lng().toFixed(6));
+          resolve({ lat: l.lat(), lng: l.lng() });
+        } else {
+          console.warn('Google geocode failed:', status);
+          resolve(null);
+        }
+      });
+    });
+    if (!loc) return;
+    lat = loc.lat;
+    lng = loc.lng;
+  }
+
+  console.log('Cadastre géoloc ' + source + ': ' + lat.toFixed(6) + ', ' + lng.toFixed(6));
+
+  // Re-run cadastre + aérienne with new coords
+  clearPolygons(currentPolygonsA);
+  clearViewportParcels();
+
+  try {
+    const parcelle = await fetchParcelleCadastre(lat, lng);
+    if (parcelle) {
+      const props = parcelle.properties || {};
+      const section = props.section || '?';
+      const numero = props.numero || '?';
+      const codeInsee = props.code_insee || props.commune || '';
+
+      drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
+      mapA.fitBounds(geojsonToBounds(parcelle.geometry));
+      google.maps.event.addListenerOnce(mapA, 'idle', () => {
+        if (mapA.getZoom() > 19) mapA.setZoom(19);
+      });
+
+      mapC.fitBounds(geojsonToBounds(parcelle.geometry));
+      google.maps.event.addListenerOnce(mapC, 'idle', () => {
+        if (mapC.getZoom() > 19) mapC.setZoom(19);
+      });
+
+      window._initialParcelId = `${section}-${numero}`;
+      loadParcellesAroundPoint(lat, lng);
+
+      document.getElementById('cadastreRef').textContent =
+        `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee} (${source.toUpperCase()})`;
+    } else {
+      mapC.setCenter({ lat, lng });
+      mapC.setZoom(19);
+      document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée (' + source.toUpperCase() + ')';
+    }
+  } catch(e) {
+    console.warn('Cadastre switch failed:', e);
+  }
 }
 
 // ===== PIN ICON =====
@@ -444,17 +518,24 @@ function drawCommuneContour(map, geojson) {
 
 // ===== FETCH PARCELLE CADASTRALE =====
 async function fetchParcelleCadastre(lat, lng) {
-  const d = 0.0001;
-  const geom = JSON.stringify({
-    type: 'Polygon',
-    coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
-  });
-  const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=1`;
-  const res = await fetch(url, { headers: { 'accept': 'application/json' } });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!data.features || !data.features.length) return null;
-  return data.features[0];
+  // Try 3m first, fallback to 5m if nothing found
+  const radii = [0.00003, 0.00005]; // ~3m, ~5m
+  for (const d of radii) {
+    const geom = JSON.stringify({
+      type: 'Polygon',
+      coordinates: [[[lng-d, lat-d], [lng+d, lat-d], [lng+d, lat+d], [lng-d, lat+d], [lng-d, lat-d]]]
+    });
+    const url = `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}&_limit=1`;
+    const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+    if (!res.ok) continue;
+    const data = await res.json();
+    if (data.features && data.features.length) {
+      console.log('Cadastre trouvé avec rayon ~' + Math.round(d * 111000) + 'm');
+      return data.features[0];
+    }
+  }
+  console.warn('Aucune parcelle trouvée à 3m ni 5m');
+  return null;
 }
 
 // ===== DRAW PARCELLE ON MAP =====
