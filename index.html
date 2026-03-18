@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v61</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v63</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -202,6 +202,22 @@
   .quick-tests button:hover { background: var(--primary); color: white; border-color: var(--primary); }
 </style>
 
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+  <span style="font-size:12px;font-weight:600;color:var(--text);">Géocodage du bien :</span>
+  <button class="geo-tab active" id="geoBan" onclick="switchGeoSource('ban')">BAN (par défaut)</button>
+  <button class="geo-tab" id="geoGoogle" onclick="switchGeoSource('google')">Google Maps</button>
+  <span id="geoInfo" style="font-size:11px;color:var(--text-light);margin-left:8px;"></span>
+</div>
+<style>
+  .geo-tab {
+    padding: 5px 14px; border: 1.5px solid var(--border); border-radius: 6px;
+    background: white; font-family: 'Ubuntu', sans-serif; font-size: 12px;
+    font-weight: 500; color: var(--text); cursor: pointer; transition: all 0.15s;
+  }
+  .geo-tab:hover { border-color: var(--primary); color: var(--primary); }
+  .geo-tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+</style>
+
 <div class="search-bar">
   <input type="text" id="addressInput" placeholder="Adresse du bien">
   <button id="goBtn" onclick="go()">Générer les plans</button>
@@ -233,10 +249,6 @@
   </div>
   <div class="map-card">
     <div class="map-label">Plan CADASTRAL</div>
-    <div class="algo-tabs" id="algoTabsCadastre">
-      <button class="algo-tab active" onclick="switchCadastreGeo('ban')">Géoloc BAN</button>
-      <button class="algo-tab" onclick="switchCadastreGeo('google')">Géoloc Google</button>
-    </div>
     <div class="map-container" id="mapCadastre"></div>
     <div class="cadastre-ref" id="cadastreRef"></div>
     <div class="cadastre-list" id="cadastreList"></div>
@@ -279,74 +291,31 @@ function switchAlgoP(n) {
   if (lastAddress) go();
 }
 
-let currentCadastreGeo = 'ban';
+let currentGeoSource = 'ban';
 
-async function switchCadastreGeo(source) {
-  currentCadastreGeo = source;
-  document.querySelectorAll('#algoTabsCadastre .algo-tab').forEach((t, i) => t.classList.toggle('active', i === (source === 'ban' ? 0 : 1)));
-  if (!lastBienData || !lastAddress) return;
+function switchGeoSource(source) {
+  currentGeoSource = source;
+  document.getElementById('geoBan').classList.toggle('active', source === 'ban');
+  document.getElementById('geoGoogle').classList.toggle('active', source === 'google');
+  if (lastAddress) go();
+}
 
-  let lat = lastBienData.lat;
-  let lng = lastBienData.lng;
-
-  if (source === 'google') {
-    // Re-geocode with Google
-    const loc = await new Promise((resolve) => {
-      const geocoder = new google.maps.Geocoder();
-      geocoder.geocode({ address: lastAddress }, function(results, status) {
-        if (status === 'OK' && results[0]) {
-          const l = results[0].geometry.location;
-          console.log('Google geocode:', l.lat().toFixed(6), l.lng().toFixed(6));
-          resolve({ lat: l.lat(), lng: l.lng() });
-        } else {
-          console.warn('Google geocode failed:', status);
-          resolve(null);
-        }
-      });
+// Google Geocoder for address (used when source = 'google')
+function geocodeGoogle(address) {
+  return new Promise((resolve) => {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: address + ', France' }, function(results, status) {
+      if (status === 'OK' && results[0]) {
+        const l = results[0].geometry.location;
+        const addr = results[0].formatted_address || address;
+        console.log('Google geocode:', l.lat().toFixed(6), l.lng().toFixed(6), addr);
+        resolve({ lat: l.lat(), lng: l.lng(), display: addr, dept: '' });
+      } else {
+        console.warn('Google geocode failed:', status);
+        resolve(null);
+      }
     });
-    if (!loc) return;
-    lat = loc.lat;
-    lng = loc.lng;
-  }
-
-  console.log('Cadastre géoloc ' + source + ': ' + lat.toFixed(6) + ', ' + lng.toFixed(6));
-
-  // Re-run cadastre + aérienne with new coords
-  clearPolygons(currentPolygonsA);
-  clearViewportParcels();
-
-  try {
-    const parcelle = await fetchParcelleCadastre(lat, lng);
-    if (parcelle) {
-      const props = parcelle.properties || {};
-      const section = props.section || '?';
-      const numero = props.numero || '?';
-      const codeInsee = props.code_insee || props.commune || '';
-
-      drawTrackedPolygon(mapA, parcelle, '#521DA5', currentPolygonsA);
-      mapA.fitBounds(geojsonToBounds(parcelle.geometry));
-      google.maps.event.addListenerOnce(mapA, 'idle', () => {
-        if (mapA.getZoom() > 19) mapA.setZoom(19);
-      });
-
-      mapC.fitBounds(geojsonToBounds(parcelle.geometry));
-      google.maps.event.addListenerOnce(mapC, 'idle', () => {
-        if (mapC.getZoom() > 19) mapC.setZoom(19);
-      });
-
-      window._initialParcelId = `${section}-${numero}`;
-      loadParcellesAroundPoint(lat, lng);
-
-      document.getElementById('cadastreRef').textContent =
-        `Section ${section} · Parcelle n°${numero} · INSEE ${codeInsee} (${source.toUpperCase()})`;
-    } else {
-      mapC.setCenter({ lat, lng });
-      mapC.setZoom(19);
-      document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée (' + source.toUpperCase() + ')';
-    }
-  } catch(e) {
-    console.warn('Cadastre switch failed:', e);
-  }
+  });
 }
 
 // ===== PIN ICON =====
@@ -976,10 +945,32 @@ async function go() {
   setStatus('Géocodage…', 'loading');
 
   try {
-    const bien = await geocode(address);
+    // Always geocode via BAN first (needed for dept code / territory detection)
+    const banResult = await geocode(address);
+    let bien = banResult;
+
+    if (currentGeoSource === 'google') {
+      setStatus('Géocodage Google…', 'loading');
+      const googleResult = await geocodeGoogle(address);
+      if (googleResult) {
+        // Use Google coords, keep BAN dept
+        bien = { lat: googleResult.lat, lng: googleResult.lng, display: googleResult.display, dept: banResult.dept };
+        const dist = haversine(banResult.lat, banResult.lng, googleResult.lat, googleResult.lng);
+        document.getElementById('geoInfo').textContent =
+          'Δ BAN↔Google: ' + (dist * 1000).toFixed(0) + 'm';
+        console.log('Géocodage: BAN=' + banResult.lat.toFixed(6) + ',' + banResult.lng.toFixed(6) +
+          ' Google=' + googleResult.lat.toFixed(6) + ',' + googleResult.lng.toFixed(6) + ' Δ' + (dist * 1000).toFixed(0) + 'm');
+      } else {
+        console.warn('Google geocode failed, fallback BAN');
+        document.getElementById('geoInfo').textContent = 'Google échoué → fallback BAN';
+      }
+    } else {
+      document.getElementById('geoInfo').textContent = '';
+    }
+
     lastAddress = address;
     lastBienData = bien;
-    setStatus(`✓ ${bien.display} — récupération des contours…`, 'loading');
+    setStatus(`✓ ${bien.display} [${currentGeoSource.toUpperCase()}] — récupération des contours…`, 'loading');
 
     initMaps();
 
@@ -1186,7 +1177,7 @@ async function go() {
     }
 
     showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
-    setStatus(address + ' — dept: ' + (bien.dept || '?') + ' — mode: ' + modeLabel, '');
+    setStatus(address + ' [' + currentGeoSource.toUpperCase() + '] — dept: ' + (bien.dept || '?') + ' — mode: ' + modeLabel, '');
 
     setTimeout(() => {
       if (mapA.getZoom() > 19) {
