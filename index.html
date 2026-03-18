@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v63</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v64</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -204,8 +204,8 @@
 
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
   <span style="font-size:12px;font-weight:600;color:var(--text);">Géocodage du bien :</span>
-  <button class="geo-tab active" id="geoBan" onclick="switchGeoSource('ban')">BAN (par défaut)</button>
-  <button class="geo-tab" id="geoGoogle" onclick="switchGeoSource('google')">Google Maps</button>
+  <button class="geo-tab" id="geoBan" onclick="switchGeoSource('ban')">BAN</button>
+  <button class="geo-tab active" id="geoGoogle" onclick="switchGeoSource('google')">Google Maps (par défaut)</button>
   <span id="geoInfo" style="font-size:11px;color:var(--text-light);margin-left:8px;"></span>
 </div>
 <style>
@@ -291,7 +291,7 @@ function switchAlgoP(n) {
   if (lastAddress) go();
 }
 
-let currentGeoSource = 'ban';
+let currentGeoSource = 'google';
 
 function switchGeoSource(source) {
   currentGeoSource = source;
@@ -382,7 +382,7 @@ function initMaps() {
 
     if (cadastreIdleTimer) clearTimeout(cadastreIdleTimer);
     cadastreIdleTimer = setTimeout(() => {
-      if (mapC.getZoom() >= 18) {
+      if (mapC.getZoom() >= 18 && window._initialCadastreLoaded) {
         loadParcellesInViewport();
       }
     }, 400);
@@ -1157,7 +1157,10 @@ async function go() {
         });
 
         window._initialParcelId = `${section}-${numero}`;
-        loadParcellesAroundPoint(bien.lat, bien.lng);
+        window._initialCadastreLoaded = false;
+        await loadParcellesAroundPoint(bien.lat, bien.lng);
+        window._initialCadastreLoaded = true;
+        console.log('Initial cadastre loaded, viewport idle listener enabled');
 
         document.getElementById('cadastreRef').textContent = cadastreRef;
         console.log('Parcelle cadastrale:', props);
@@ -1167,6 +1170,7 @@ async function go() {
         mapC.setCenter({ lat: bien.lat, lng: bien.lng });
         mapC.setZoom(19);
         document.getElementById('cadastreRef').textContent = 'Parcelle non trouvée';
+        window._initialCadastreLoaded = true;
       }
     } catch(e) {
       console.warn('Cadastre failed:', e);
@@ -1174,6 +1178,7 @@ async function go() {
       mapA.setZoom(19);
       mapC.setCenter({ lat: bien.lat, lng: bien.lng });
       mapC.setZoom(19);
+      window._initialCadastreLoaded = true;
     }
 
     showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase);
