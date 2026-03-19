@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v69</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v70</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -1357,27 +1357,38 @@ async function doParticuliereAlgo2(bien) {
       return await doParticuliereStandard(bien);
     }
 
-    // FitBounds on [bien, centre-ville]
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend({ lat: bien.lat, lng: bien.lng });
-    bounds.extend({ lat: center.lat, lng: center.lng });
-    mapP.fitBounds(bounds);
+    // Check distance bien ↔ centre-ville
+    const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
+    console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
-    // After fitBounds settles → clamp zoom 13-zoomMax (idle chain)
-    google.maps.event.addListenerOnce(mapP, 'idle', () => {
-      let z = mapP.getZoom();
-      if (z > zoomMax) mapP.setZoom(zoomMax);
-      else if (z < 14) mapP.setZoom(14);
+    if (distBienCentre > 5) {
+      // Google Geocoder returned a wrong centre-ville (homonym?), ignore it
+      console.warn(communeName + ': centre-ville Google trop loin (' + distBienCentre.toFixed(0) + 'km) → centrage sur le bien au zoom ' + zoomMax);
+      mapP.setCenter({ lat: bien.lat, lng: bien.lng });
+      mapP.setZoom(zoomMax);
+    } else {
+      // FitBounds on [bien, centre-ville]
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend({ lat: bien.lat, lng: bien.lng });
+      bounds.extend({ lat: center.lat, lng: center.lng });
+      mapP.fitBounds(bounds);
 
-      // After zoom clamp settles → ensure both points have 20% margin
+      // After fitBounds settles → clamp zoom 14-zoomMax (idle chain)
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
-        checkAndPanForMargin(mapP, [
-          { lat: bien.lat, lng: bien.lng },
-          { lat: center.lat, lng: center.lng }
-        ], 0.20);
-        console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
+        let z = mapP.getZoom();
+        if (z > zoomMax) mapP.setZoom(zoomMax);
+        else if (z < 14) mapP.setZoom(14);
+
+        // After zoom clamp settles → ensure both points have 20% margin
+        google.maps.event.addListenerOnce(mapP, 'idle', () => {
+          checkAndPanForMargin(mapP, [
+            { lat: bien.lat, lng: bien.lng },
+            { lat: center.lat, lng: center.lng }
+          ], 0.20);
+          console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
+        });
       });
-    });
+    }
 
   } catch(e) {
     console.warn('Particuliere algo2 failed:', e);
