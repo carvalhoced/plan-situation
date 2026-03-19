@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v72</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v74</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -623,13 +623,23 @@ const TOP10_CITIES = [
 
 function detectTop10(lat, lng) {
   const NEARBY_RADIUS = 30;
+  // Only TOP3 get the INSIDE (close-up) view
+  const INSIDE_CITIES = ['Paris', 'Marseille', 'Lyon'];
   for (const c of TOP10_CITIES) {
     const dist = haversine(lat, lng, c.lat, c.lng);
     if (dist <= c.radiusIn) {
-      return { city: { ...c, dist }, mode: 'inside' };
+      if (INSIDE_CITIES.includes(c.nom)) {
+        return { city: { ...c, dist }, mode: 'inside' };
+      }
+      // Non-TOP3 city: skip entirely, let it fall through to STANDARD → algo 4
+      continue;
     }
     if (dist <= NEARBY_RADIUS) {
-      return { city: { ...c, dist }, mode: 'nearby' };
+      if (INSIDE_CITIES.includes(c.nom)) {
+        return { city: { ...c, dist }, mode: 'nearby' };
+      }
+      // Non-TOP3 nearby: also skip to STANDARD
+      continue;
     }
   }
   return null;
@@ -797,7 +807,7 @@ function findCitiesForGeneraleV4(lat, lng) {
 // ===== CLAMP MAP TO FRANCE — max X% outside borders =====
 function clampToFrance(map, bienLat, bienLng, maxOverflow) {
   // France métropolitaine approximate bounds
-  const FR = { north: 51.1, south: 42.3, west: -5.2, east: 8.3 };
+  const FR = { north: 51.1, south: 42.3, west: -4.8, east: 8.3 };
 
   const bounds = map.getBounds();
   if (!bounds) return;
@@ -1245,7 +1255,7 @@ async function go() {
           mapG.setZoom(result.fixedZoom);
           // Clamp: max 20% du viewport hors France métropolitaine
           google.maps.event.addListenerOnce(mapG, 'idle', () => {
-            clampToFrance(mapG, bien.lat, bien.lng, 0.20);
+            clampToFrance(mapG, bien.lat, bien.lng, 0.15);
           });
         } else if (gCities.length > 0) {
           const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
