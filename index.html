@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v76</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v77</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -812,17 +812,20 @@ function findCitiesForGeneraleV4(lat, lng) {
 // ===== CLAMP MAP TO FRANCE — max X% outside borders =====
 function clampToFrance(map, bienLat, bienLng, maxOverflow) {
   // France métropolitaine bounds
-  // West bound varies by latitude: Brittany is wide (-4.8°), south coast is narrow (-1.5°)
-  // Linear interpolation: at lat 48.5° → -4.8°, at lat 43° → -1.5°
+  // West bound varies by latitude to follow the Atlantic coastline
+  // Piecewise: Bretagne stays wide (cities on coast), south coast is narrow
   const westAtLat = (lat) => {
-    if (lat >= 48.5) return -4.8;   // Bretagne
-    if (lat <= 43.0) return -1.5;   // Pays Basque
-    // Interpolation linéaire entre les deux
-    const t = (lat - 43.0) / (48.5 - 43.0);
-    return -1.5 + t * (-4.8 - (-1.5)); // -1.5 → -4.8
+    if (lat >= 47.5) return -4.5;   // Bretagne (Brest, Quimper)
+    if (lat <= 43.5) return -1.0;   // Pays Basque
+    // Interpolation between 43.5 (-1.0°) and 47.5 (-4.5°)
+    const t = (lat - 43.5) / (47.5 - 43.5);
+    return -1.0 + t * (-4.5 - (-1.0));
   };
   const FR = { north: 51.1, south: 42.3, west: westAtLat(bienLat), east: 8.3 };
-  console.log('Clamp France: FR.west=' + FR.west.toFixed(1) + '° pour lat=' + bienLat.toFixed(1));
+
+  // If bien is far inland (> 2° east of the coast), reduce west overflow tolerance
+  const westOverflow = (bienLng > FR.west + 2) ? maxOverflow * 0.5 : maxOverflow;
+  console.log('Clamp France: FR.west=' + FR.west.toFixed(1) + '° westOverflow=' + (westOverflow*100).toFixed(0) + '% pour lat=' + bienLat.toFixed(1));
 
   const bounds = map.getBounds();
   if (!bounds) return;
@@ -832,6 +835,7 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
   const w = ne.lng() - sw.lng();
   const maxH = h * maxOverflow;
   const maxW = w * maxOverflow;
+  const maxWwest = w * westOverflow; // tighter for Atlantic coast when bien is inland
 
   let panLat = 0, panLng = 0;
 
@@ -845,9 +849,9 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
     panLat = (FR.north + maxH) - ne.lat();
     console.log('Clamp France: pan sud ' + panLat.toFixed(2) + '° (nord hors France)');
   }
-  // West overflow (Atlantique/Manche)
-  if (sw.lng() < FR.west - maxW) {
-    panLng = (FR.west - maxW) - sw.lng();
+  // West overflow (Atlantique/Manche) — tighter when inland
+  if (sw.lng() < FR.west - maxWwest) {
+    panLng = (FR.west - maxWwest) - sw.lng();
     console.log('Clamp France: pan est +' + panLng.toFixed(2) + '° (ouest hors France)');
   }
   // East overflow (Allemagne, Suisse, Italie)
