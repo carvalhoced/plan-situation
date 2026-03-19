@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v74</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v75</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -248,6 +248,11 @@
   <div class="map-card">
     <div class="map-label">Vue AÉRIENNE</div>
     <div class="map-container" id="mapAerienne"></div>
+    <div style="padding:6px 16px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);background:#f8f8fa;">
+      <button id="drawSquareBtn" onclick="toggleDrawSquare()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;">✏️ Tracer le bien</button>
+      <button id="clearSquareBtn" onclick="clearSquareOverlay()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;display:none;">✕ Effacer</button>
+      <span id="drawHint" style="font-size:11px;color:var(--text-light);"></span>
+    </div>
   </div>
   <div class="map-card">
     <div class="map-label">Plan CADASTRAL</div>
@@ -1289,6 +1294,7 @@ async function go() {
 
     clearPolygons(currentPolygonsA);
     clearViewportParcels();
+    clearSquareOverlay();
 
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
@@ -1871,6 +1877,166 @@ function updateAerienneFromSelection() {
   google.maps.event.addListenerOnce(mapA, 'idle', () => {
     if (mapA.getZoom() > 19) mapA.setZoom(19);
   });
+}
+
+// ===== DRAW SQUARE ON AÉRIENNE =====
+let drawingMode = false;
+let drawStartLatLng = null;
+let drawTempRect = null;
+let drawFinalSquare = null;
+let drawMouseListener = null;
+let drawClickListener = null;
+
+function toggleDrawSquare() {
+  if (drawingMode) {
+    cancelDrawing();
+    return;
+  }
+  drawingMode = true;
+  document.getElementById('drawSquareBtn').style.background = '#FF6600';
+  document.getElementById('drawSquareBtn').style.color = 'white';
+  document.getElementById('drawSquareBtn').style.borderColor = '#FF6600';
+  document.getElementById('drawHint').textContent = 'Cliquez un coin, puis cliquez le coin opposé';
+  mapA.setOptions({ draggable: false, scrollwheel: false });
+
+  let clickCount = 0;
+
+  drawClickListener = mapA.addListener('click', (e) => {
+    clickCount++;
+    if (clickCount === 1) {
+      // First click: start point
+      drawStartLatLng = e.latLng;
+      document.getElementById('drawHint').textContent = 'Cliquez le coin opposé';
+    } else if (clickCount === 2) {
+      // Second click: end point → create perfect square
+      const endLatLng = e.latLng;
+      createPerfectSquare(drawStartLatLng, endLatLng);
+      finishDrawing();
+    }
+  });
+
+  // Live preview rectangle
+  drawMouseListener = mapA.addListener('mousemove', (e) => {
+    if (!drawStartLatLng) return;
+    if (drawTempRect) drawTempRect.setMap(null);
+    const start = drawStartLatLng;
+    const end = e.latLng;
+    drawTempRect = new google.maps.Rectangle({
+      bounds: {
+        north: Math.max(start.lat(), end.lat()),
+        south: Math.min(start.lat(), end.lat()),
+        east: Math.max(start.lng(), end.lng()),
+        west: Math.min(start.lng(), end.lng()),
+      },
+      strokeColor: '#FF6600',
+      strokeOpacity: 0.6,
+      strokeWeight: 1.5,
+      fillColor: '#FF6600',
+      fillOpacity: 0.08,
+      map: mapA,
+      clickable: false,
+    });
+  });
+}
+
+function createPerfectSquare(start, end) {
+  // Calculate center of the drawn rectangle
+  const centerLat = (start.lat() + end.lat()) / 2;
+  const centerLng = (start.lng() + end.lng()) / 2;
+
+  // Get the max dimension (width or height) in degrees
+  const dLat = Math.abs(start.lat() - end.lat());
+  const dLng = Math.abs(start.lng() - end.lng());
+
+  // Convert lng to equivalent lat distance for a true square
+  const lngToLat = Math.cos(centerLat * Math.PI / 180);
+  const dLatEquiv = dLng * lngToLat; // lng dimension in lat-equivalent
+
+  // Use the larger dimension
+  let halfSide;
+  if (dLat >= dLatEquiv) {
+    halfSide = dLat / 2;
+  } else {
+    halfSide = dLatEquiv / 2;
+  }
+
+  // Convert back to lat/lng
+  const halfLng = halfSide / lngToLat;
+
+  // Remove old square
+  if (drawFinalSquare) drawFinalSquare.setMap(null);
+
+  drawFinalSquare = new google.maps.Rectangle({
+    bounds: {
+      north: centerLat + halfSide,
+      south: centerLat - halfSide,
+      east: centerLng + halfLng,
+      west: centerLng - halfLng,
+    },
+    strokeColor: '#FF6600',
+    strokeOpacity: 0.9,
+    strokeWeight: 2.5,
+    fillColor: '#FF6600',
+    fillOpacity: 0.1,
+    map: mapA,
+    editable: true, // allow resize
+    draggable: true, // allow move
+  });
+
+  document.getElementById('clearSquareBtn').style.display = 'inline-block';
+
+  // When user edits the square, re-square it
+  drawFinalSquare.addListener('bounds_changed', () => {
+    reSquare(drawFinalSquare);
+  });
+}
+
+// Re-enforce perfect square after user drag/resize
+function reSquare(rect) {
+  const b = rect.getBounds();
+  const ne = b.getNorthEast();
+  const sw = b.getSouthWest();
+  const centerLat = (ne.lat() + sw.lat()) / 2;
+  const centerLng = (ne.lng() + sw.lng()) / 2;
+  const dLat = ne.lat() - sw.lat();
+  const dLng = ne.lng() - sw.lng();
+  const lngToLat = Math.cos(centerLat * Math.PI / 180);
+  const dLatEquiv = dLng * lngToLat;
+  let halfSide = Math.max(dLat, dLatEquiv) / 2;
+  const halfLng = halfSide / lngToLat;
+
+  // Temporarily remove listener to avoid infinite loop
+  google.maps.event.clearListeners(rect, 'bounds_changed');
+  rect.setBounds({
+    north: centerLat + halfSide,
+    south: centerLat - halfSide,
+    east: centerLng + halfLng,
+    west: centerLng - halfLng,
+  });
+  // Re-add listener
+  rect.addListener('bounds_changed', () => reSquare(rect));
+}
+
+function finishDrawing() {
+  drawingMode = false;
+  if (drawTempRect) { drawTempRect.setMap(null); drawTempRect = null; }
+  if (drawClickListener) { google.maps.event.removeListener(drawClickListener); drawClickListener = null; }
+  if (drawMouseListener) { google.maps.event.removeListener(drawMouseListener); drawMouseListener = null; }
+  drawStartLatLng = null;
+  mapA.setOptions({ draggable: true, scrollwheel: true });
+  document.getElementById('drawSquareBtn').style.background = 'white';
+  document.getElementById('drawSquareBtn').style.color = 'var(--text)';
+  document.getElementById('drawSquareBtn').style.borderColor = 'var(--border)';
+  document.getElementById('drawHint').textContent = '';
+}
+
+function cancelDrawing() {
+  finishDrawing();
+}
+
+function clearSquareOverlay() {
+  if (drawFinalSquare) { drawFinalSquare.setMap(null); drawFinalSquare = null; }
+  document.getElementById('clearSquareBtn').style.display = 'none';
 }
 
 function quickTest(address) {
