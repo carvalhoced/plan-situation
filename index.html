@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v66</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v67</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -723,15 +723,20 @@ function findCitiesForGeneraleV3(lat, lng) {
     return { cities, phase: 'P2: top10 < 100km' + (nearby90k.length ? ' + ' + nearby90k[0].nom + ' (' + nearby90k[0].dist.toFixed(0) + 'km)' : ' (seule)') };
   }
 
-  // Phase 3: Top 10 > 100km → always nearest top10 + nearest ville > 150k
+  // Phase 3: Top 10 > 100km → always nearest TOP5 + nearest ville > 150k
+  // TOP5 = villes repère universelles
+  const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
   const cities = [];
 
-  // Always include nearest top 10
-  if (nearestTop10) {
-    cities.push(nearestTop10);
+  // Always include nearest TOP5
+  const nearestTop5 = top10WithDist
+    .filter(c => TOP5.includes(c.nom))
+    .sort((a,b) => a.dist - b.dist)[0];
+  if (nearestTop5) {
+    cities.push(nearestTop5);
   }
 
-  // Add nearest city > 150k (different from the top10 already picked)
+  // Add nearest city > 150k (different from the top5 already picked)
   const nearest150k = allCitiesWithDist
     .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
     .slice(0, 1);
@@ -743,7 +748,7 @@ function findCitiesForGeneraleV3(lat, lng) {
   cities.push(...nearbyCities);
 
   const names = cities.map(c => c.nom + ' (' + (c.pop/1000).toFixed(0) + 'k, ' + c.dist.toFixed(0) + 'km)').join(', ');
-  return { cities, phase: 'P3: top10 + ville > 150k → ' + names };
+  return { cities, phase: 'P3: top5 + ville > 150k → ' + names };
 }
 
 function citiesBounds(lat, lng, cities, padding = 0.10) {
