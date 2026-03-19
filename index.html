@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v77</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v78</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -182,6 +182,7 @@
   <button onclick="quickTest('12 rue du bourg 39600 Arbois')">Arbois</button>
   <button onclick="quickTest('5 rue de la mairie 50170 Pontorson')">Pontorson</button>
   <button onclick="quickTest('15B rue de la Charrière 52400 Vicq')">Vicq</button>
+  <button onclick="quickTest('12 rue Gambetta 64500 Saint-Jean-de-Luz')">St-Jean-de-Luz</button>
 </div>
 <div class="quick-tests" style="margin:0 0 16px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
   <span style="font-size:11px;color:var(--text-light);margin-right:2px;">DOM-TOM :</span>
@@ -249,9 +250,8 @@
     <div class="map-label">Vue AÉRIENNE</div>
     <div class="map-container" id="mapAerienne"></div>
     <div style="padding:6px 16px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);background:#f8f8fa;">
-      <button id="drawSquareBtn" onclick="toggleDrawSquare()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;">✏️ Tracer le bien</button>
-      <button id="clearSquareBtn" onclick="clearSquareOverlay()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;display:none;">✕ Effacer</button>
-      <span id="drawHint" style="font-size:11px;color:var(--text-light);">Tracez un rectangle → il deviendra un carré parfait</span>
+      <button id="drawRectBtn" onclick="toggleDrawRect()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;">✏️ Délimiter le bien</button>
+      <span id="drawHint" style="font-size:11px;color:var(--text-light);">Tracez un rectangle sur la vue aérienne</span>
     </div>
   </div>
   <div class="map-card">
@@ -867,7 +867,7 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
 
   // After pan, ensure pin is still visible with 10% margin
   google.maps.event.addListenerOnce(map, 'idle', () => {
-    checkAndPanForMargin(map, [{ lat: bienLat, lng: bienLng }], 0.10);
+    checkAndPanForMargin(map, [{ lat: bienLat, lng: bienLng }], 0.15);
   });
 }
 
@@ -1308,7 +1308,7 @@ async function go() {
 
     clearPolygons(currentPolygonsA);
     clearViewportParcels();
-    clearSquareOverlay();
+    clearRectOverlay();
 
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
@@ -1893,16 +1893,16 @@ function updateAerienneFromSelection() {
   });
 }
 
-// ===== DRAW SQUARE ON AÉRIENNE (Google DrawingManager) =====
+// ===== DRAW RECTANGLE ON AÉRIENNE (Google DrawingManager) =====
 let drawingManager = null;
-let drawFinalSquare = null;
+let drawFinalRect = null;
 let drawingActive = false;
 
 function initDrawingManager() {
   if (drawingManager) return;
   drawingManager = new google.maps.drawing.DrawingManager({
-    drawingMode: null, // inactive by default
-    drawingControl: false, // we use our own button
+    drawingMode: null,
+    drawingControl: false,
     rectangleOptions: {
       strokeColor: '#FF6600',
       strokeOpacity: 0.9,
@@ -1915,79 +1915,46 @@ function initDrawingManager() {
   });
   drawingManager.setMap(mapA);
 
-  // When a rectangle is drawn → transform to perfect square
   google.maps.event.addListener(drawingManager, 'rectanglecomplete', (rect) => {
-    // Remove previous square
-    if (drawFinalSquare) drawFinalSquare.setMap(null);
+    // Remove previous rectangle if any
+    if (drawFinalRect) drawFinalRect.setMap(null);
+    drawFinalRect = rect;
 
-    // Transform to perfect square
-    makeSquare(rect);
-    drawFinalSquare = rect;
-
-    // Re-square on resize/drag
-    rect.addListener('bounds_changed', () => makeSquare(rect));
+    // Remove cadastre contour from aérienne — the rectangle replaces it
+    clearPolygons(currentPolygonsA);
 
     // Exit drawing mode
     drawingManager.setDrawingMode(null);
     drawingActive = false;
-    document.getElementById('drawSquareBtn').style.background = 'white';
-    document.getElementById('drawSquareBtn').style.color = 'var(--text)';
-    document.getElementById('drawSquareBtn').style.borderColor = 'var(--border)';
-    document.getElementById('clearSquareBtn').style.display = 'inline-block';
-    document.getElementById('drawHint').textContent = 'Carré déplaçable et redimensionnable';
+    document.getElementById('drawRectBtn').style.background = 'white';
+    document.getElementById('drawRectBtn').style.color = 'var(--text)';
+    document.getElementById('drawRectBtn').style.borderColor = 'var(--border)';
+    document.getElementById('drawHint').textContent = 'Rectangle déplaçable et redimensionnable';
   });
 }
 
-function makeSquare(rect) {
-  const b = rect.getBounds();
-  const ne = b.getNorthEast();
-  const sw = b.getSouthWest();
-  const centerLat = (ne.lat() + sw.lat()) / 2;
-  const centerLng = (ne.lng() + sw.lng()) / 2;
-  const dLat = ne.lat() - sw.lat();
-  const dLng = ne.lng() - sw.lng();
-  const lngToLat = Math.cos(centerLat * Math.PI / 180);
-  const dLatEquiv = dLng * lngToLat;
-  const halfSide = Math.max(dLat, dLatEquiv) / 2;
-  const halfLng = halfSide / lngToLat;
-
-  // Temporarily remove listener to avoid infinite loop
-  google.maps.event.clearListeners(rect, 'bounds_changed');
-  rect.setBounds({
-    north: centerLat + halfSide,
-    south: centerLat - halfSide,
-    east: centerLng + halfLng,
-    west: centerLng - halfLng,
-  });
-  // Re-add listener
-  rect.addListener('bounds_changed', () => makeSquare(rect));
-}
-
-function toggleDrawSquare() {
+function toggleDrawRect() {
   initDrawingManager();
   if (drawingActive) {
-    // Cancel drawing
     drawingManager.setDrawingMode(null);
     drawingActive = false;
-    document.getElementById('drawSquareBtn').style.background = 'white';
-    document.getElementById('drawSquareBtn').style.color = 'var(--text)';
-    document.getElementById('drawSquareBtn').style.borderColor = 'var(--border)';
+    document.getElementById('drawRectBtn').style.background = 'white';
+    document.getElementById('drawRectBtn').style.color = 'var(--text)';
+    document.getElementById('drawRectBtn').style.borderColor = 'var(--border)';
     return;
   }
   drawingActive = true;
   drawingManager.setDrawingMode(google.maps.drawing.OverlayType.RECTANGLE);
-  document.getElementById('drawSquareBtn').style.background = '#FF6600';
-  document.getElementById('drawSquareBtn').style.color = 'white';
-  document.getElementById('drawSquareBtn').style.borderColor = '#FF6600';
+  document.getElementById('drawRectBtn').style.background = '#FF6600';
+  document.getElementById('drawRectBtn').style.color = 'white';
+  document.getElementById('drawRectBtn').style.borderColor = '#FF6600';
   document.getElementById('drawHint').textContent = 'Tracez un rectangle sur la carte';
 }
 
-function clearSquareOverlay() {
-  if (drawFinalSquare) { drawFinalSquare.setMap(null); drawFinalSquare = null; }
+function clearRectOverlay() {
+  if (drawFinalRect) { drawFinalRect.setMap(null); drawFinalRect = null; }
   if (drawingManager) { drawingManager.setMap(null); drawingManager = null; }
   drawingActive = false;
-  document.getElementById('clearSquareBtn').style.display = 'none';
-  document.getElementById('drawHint').textContent = 'Tracez un rectangle → il deviendra un carré parfait';
 }
 
 function quickTest(address) {
