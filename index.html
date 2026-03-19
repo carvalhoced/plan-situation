@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v71</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v72</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -794,6 +794,54 @@ function findCitiesForGeneraleV4(lat, lng) {
   return { cities, phase: 'Zoom 7 · ' + names, fixedZoom: 7 };
 }
 
+// ===== CLAMP MAP TO FRANCE — max X% outside borders =====
+function clampToFrance(map, bienLat, bienLng, maxOverflow) {
+  // France métropolitaine approximate bounds
+  const FR = { north: 51.1, south: 42.3, west: -5.2, east: 8.3 };
+
+  const bounds = map.getBounds();
+  if (!bounds) return;
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const h = ne.lat() - sw.lat();
+  const w = ne.lng() - sw.lng();
+  const maxH = h * maxOverflow;
+  const maxW = w * maxOverflow;
+
+  let panLat = 0, panLng = 0;
+
+  // South overflow (Espagne, Andorre)
+  if (sw.lat() < FR.south - maxH) {
+    panLat = (FR.south - maxH) - sw.lat();
+    console.log('Clamp France: pan nord +' + panLat.toFixed(2) + '° (sud hors France)');
+  }
+  // North overflow (Belgique, UK)
+  if (ne.lat() > FR.north + maxH) {
+    panLat = (FR.north + maxH) - ne.lat();
+    console.log('Clamp France: pan sud ' + panLat.toFixed(2) + '° (nord hors France)');
+  }
+  // West overflow (Atlantique)
+  if (sw.lng() < FR.west - maxW) {
+    panLng = (FR.west - maxW) - sw.lng();
+    console.log('Clamp France: pan est +' + panLng.toFixed(2) + '° (ouest hors France)');
+  }
+  // East overflow (Allemagne, Suisse, Italie)
+  if (ne.lng() > FR.east + maxW) {
+    panLng = (FR.east + maxW) - ne.lng();
+    console.log('Clamp France: pan ouest ' + panLng.toFixed(2) + '° (est hors France)');
+  }
+
+  if (panLat !== 0 || panLng !== 0) {
+    const center = map.getCenter();
+    map.panTo({ lat: center.lat() + panLat, lng: center.lng() + panLng });
+  }
+
+  // After pan, ensure pin is still visible with 10% margin
+  google.maps.event.addListenerOnce(map, 'idle', () => {
+    checkAndPanForMargin(map, [{ lat: bienLat, lng: bienLng }], 0.10);
+  });
+}
+
 function citiesBounds(lat, lng, cities, padding = 0.10) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend({ lat, lng });
@@ -1192,10 +1240,13 @@ async function go() {
         console.log(`Algo ${selectedAlgo}: ${algoPhase} → ${gCities.map(c => c.nom + ' (' + c.dist.toFixed(0) + 'km)').join(', ')}`);
 
         if (result.fixedZoom) {
-          // Algo 4: zoom fixe, centré sur le bien
+          // Algo 4: zoom fixe, centré sur le bien, clampé à la France
           mapG.setCenter({ lat: bien.lat, lng: bien.lng });
           mapG.setZoom(result.fixedZoom);
-          ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
+          // Clamp: max 20% du viewport hors France métropolitaine
+          google.maps.event.addListenerOnce(mapG, 'idle', () => {
+            clampToFrance(mapG, bien.lat, bien.lng, 0.20);
+          });
         } else if (gCities.length > 0) {
           const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
           const allPoints = [{ lat: bien.lat, lng: bien.lng }, ...gCities.map(c => ({ lat: c.lat, lng: c.lng }))];
