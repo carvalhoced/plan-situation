@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v64</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v66</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -181,6 +181,7 @@
   <button onclick="quickTest('1 place du Capitole 31000 Toulouse')">Toulouse</button>
   <button onclick="quickTest('12 rue du bourg 39600 Arbois')">Arbois</button>
   <button onclick="quickTest('5 rue de la mairie 50170 Pontorson')">Pontorson</button>
+  <button onclick="quickTest('15B rue de la Charrière 52400 Vicq')">Vicq</button>
 </div>
 <div class="quick-tests" style="margin:0 0 16px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
   <span style="font-size:11px;color:var(--text-light);margin-right:2px;">DOM-TOM :</span>
@@ -316,6 +317,19 @@ function geocodeGoogle(address) {
       }
     });
   });
+}
+
+// ===== EXTRACT DEPT FROM POSTAL CODE =====
+function extractDeptFromAddress(address) {
+  const match = address.match(/\b(\d{5})\b/);
+  if (!match) return '';
+  const cp = match[1];
+  // DOM-TOM: 971xx→971, 972xx→972, etc.
+  if (cp.startsWith('97')) return cp.substring(0, 3);
+  // Corse: 20000-20190 → 2A, 20200+ → 2B
+  if (cp.startsWith('20')) return parseInt(cp) >= 20200 ? '2B' : '2A';
+  // Métropole: 2 premiers chiffres
+  return cp.substring(0, 2);
 }
 
 // ===== PIN ICON =====
@@ -709,16 +723,27 @@ function findCitiesForGeneraleV3(lat, lng) {
     return { cities, phase: 'P2: top10 < 100km' + (nearby90k.length ? ' + ' + nearby90k[0].nom + ' (' + nearby90k[0].dist.toFixed(0) + 'km)' : ' (seule)') };
   }
 
-  // Phase 3: Top 10 > 100km → 2 nearest cities > 150k (or top10)
-  const refCities = allCitiesWithDist
-    .filter(c => c.pop >= 150000 || TOP10_CITIES.some(t => t.nom === c.nom))
-    .slice(0, 2);
+  // Phase 3: Top 10 > 100km → always nearest top10 + nearest ville > 150k
+  const cities = [];
 
+  // Always include nearest top 10
+  if (nearestTop10) {
+    cities.push(nearestTop10);
+  }
+
+  // Add nearest city > 150k (different from the top10 already picked)
+  const nearest150k = allCitiesWithDist
+    .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
+    .slice(0, 1);
+  cities.push(...nearest150k);
+
+  // Bonus: add any city > 100k within 50km (not already in list)
   const nearbyCities = allCitiesWithDist
-    .filter(c => c.pop >= 100000 && c.dist < 50 && !refCities.some(r => r.nom === c.nom));
-  const cities = [...refCities, ...nearbyCities];
+    .filter(c => c.pop >= 100000 && c.dist < 50 && !cities.some(r => r.nom === c.nom));
+  cities.push(...nearbyCities);
 
-  return { cities, phase: 'P3: 2 villes > 150k' + (nearbyCities.length ? ' + ' + nearbyCities.map(c => c.nom).join(', ') + ' (< 50km)' : '') };
+  const names = cities.map(c => c.nom + ' (' + (c.pop/1000).toFixed(0) + 'k, ' + c.dist.toFixed(0) + 'km)').join(', ');
+  return { cities, phase: 'P3: top10 + ville > 150k → ' + names };
 }
 
 function citiesBounds(lat, lng, cities, padding = 0.10) {
@@ -945,26 +970,26 @@ async function go() {
   setStatus('Géocodage…', 'loading');
 
   try {
-    // Always geocode via BAN first (needed for dept code / territory detection)
-    const banResult = await geocode(address);
-    let bien = banResult;
+    let bien;
 
     if (currentGeoSource === 'google') {
+      // Mode Google: géocode Google + dept extrait du code postal → pas d'appel BAN
       setStatus('Géocodage Google…', 'loading');
       const googleResult = await geocodeGoogle(address);
       if (googleResult) {
-        // Use Google coords, keep BAN dept
-        bien = { lat: googleResult.lat, lng: googleResult.lng, display: googleResult.display, dept: banResult.dept };
-        const dist = haversine(banResult.lat, banResult.lng, googleResult.lat, googleResult.lng);
-        document.getElementById('geoInfo').textContent =
-          'Δ BAN↔Google: ' + (dist * 1000).toFixed(0) + 'm';
-        console.log('Géocodage: BAN=' + banResult.lat.toFixed(6) + ',' + banResult.lng.toFixed(6) +
-          ' Google=' + googleResult.lat.toFixed(6) + ',' + googleResult.lng.toFixed(6) + ' Δ' + (dist * 1000).toFixed(0) + 'm');
+        const dept = extractDeptFromAddress(address);
+        bien = { lat: googleResult.lat, lng: googleResult.lng, display: googleResult.display, dept };
+        document.getElementById('geoInfo').textContent = 'Dept: ' + (dept || '?') + ' (code postal)';
+        console.log('Google geocode: ' + bien.lat.toFixed(6) + ',' + bien.lng.toFixed(6) + ' dept=' + dept);
       } else {
+        // Fallback BAN si Google échoue
         console.warn('Google geocode failed, fallback BAN');
+        bien = await geocode(address);
         document.getElementById('geoInfo').textContent = 'Google échoué → fallback BAN';
       }
     } else {
+      // Mode BAN: comme avant
+      bien = await geocode(address);
       document.getElementById('geoInfo').textContent = '';
     }
 
