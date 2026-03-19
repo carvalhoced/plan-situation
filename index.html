@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v67</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v68</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -697,8 +697,10 @@ function findCitiesForGeneraleV2(lat, lng) {
   return { cities: refCities, phase: 'P3: 2 villes référence' };
 }
 
-// ===== ALGO 3 — Comme algo 2 mais P1 à 40km et P3 villes > 150k =====
+// ===== ALGO 3 — Toujours une TOP5 visible =====
 function findCitiesForGeneraleV3(lat, lng) {
+  const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
+
   const top10WithDist = TOP10_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
   })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
@@ -708,47 +710,47 @@ function findCitiesForGeneraleV3(lat, lng) {
   })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
 
   const nearestTop10 = top10WithDist.length > 0 ? top10WithDist[0] : null;
+  const nearestTop5 = top10WithDist.filter(c => TOP5.includes(c.nom))[0] || null;
 
-  // Phase 1: Top 10 < 40km → just that city (was 50km)
+  let cities = [];
+  let phase = '';
+
+  // Phase 1: Top 10 < 40km → that city
   if (nearestTop10 && nearestTop10.dist < 40) {
-    return { cities: [nearestTop10], phase: 'P1: top10 < 40km' };
+    cities = [nearestTop10];
+    phase = 'P1: top10 < 40km';
   }
-
   // Phase 2: Top 10 40-100km → that top10 + nearest city > 90k
-  if (nearestTop10 && nearestTop10.dist <= 100) {
+  else if (nearestTop10 && nearestTop10.dist <= 100) {
     const nearby90k = allCitiesWithDist
       .filter(c => c.pop >= 90000 && c.nom !== nearestTop10.nom)
       .slice(0, 1);
-    const cities = [nearestTop10, ...nearby90k];
-    return { cities, phase: 'P2: top10 < 100km' + (nearby90k.length ? ' + ' + nearby90k[0].nom + ' (' + nearby90k[0].dist.toFixed(0) + 'km)' : ' (seule)') };
+    cities = [nearestTop10, ...nearby90k];
+    phase = 'P2: top10 < 100km';
+  }
+  // Phase 3: > 100km → nearest top5 + ville > 150k
+  else {
+    if (nearestTop5) cities.push(nearestTop5);
+    const nearest150k = allCitiesWithDist
+      .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
+      .slice(0, 1);
+    cities.push(...nearest150k);
+    // Bonus: ville > 100k within 50km
+    const nearbyCities = allCitiesWithDist
+      .filter(c => c.pop >= 100000 && c.dist < 50 && !cities.some(r => r.nom === c.nom));
+    cities.push(...nearbyCities);
+    phase = 'P3';
   }
 
-  // Phase 3: Top 10 > 100km → always nearest TOP5 + nearest ville > 150k
-  // TOP5 = villes repère universelles
-  const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
-  const cities = [];
-
-  // Always include nearest TOP5
-  const nearestTop5 = top10WithDist
-    .filter(c => TOP5.includes(c.nom))
-    .sort((a,b) => a.dist - b.dist)[0];
-  if (nearestTop5) {
+  // GARANTIE: toujours au moins une TOP5 dans le cadrage
+  const hasTop5 = cities.some(c => TOP5.includes(c.nom));
+  if (!hasTop5 && nearestTop5) {
     cities.push(nearestTop5);
+    phase += ' +top5';
   }
-
-  // Add nearest city > 150k (different from the top5 already picked)
-  const nearest150k = allCitiesWithDist
-    .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
-    .slice(0, 1);
-  cities.push(...nearest150k);
-
-  // Bonus: add any city > 100k within 50km (not already in list)
-  const nearbyCities = allCitiesWithDist
-    .filter(c => c.pop >= 100000 && c.dist < 50 && !cities.some(r => r.nom === c.nom));
-  cities.push(...nearbyCities);
 
   const names = cities.map(c => c.nom + ' (' + (c.pop/1000).toFixed(0) + 'k, ' + c.dist.toFixed(0) + 'km)').join(', ');
-  return { cities, phase: 'P3: top5 + ville > 150k → ' + names };
+  return { cities, phase: phase + ' → ' + names };
 }
 
 function citiesBounds(lat, lng, cities, padding = 0.10) {
@@ -1094,8 +1096,23 @@ async function go() {
       modeLabel = 'proche de ' + top10.city.nom;
       console.log('Mode NEARBY: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
 
-      const gBounds = citiesBounds(bien.lat, bien.lng, [top10.city]);
-      const nearbyPoints = [{ lat: bien.lat, lng: bien.lng }, { lat: top10.city.lat, lng: top10.city.lng }];
+      // Ensure a TOP5 is in the framing
+      const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
+      const refCities = [top10.city];
+      if (!TOP5.includes(top10.city.nom)) {
+        // Add nearest TOP5
+        const nearestTop5 = TOP10_CITIES.map(c => ({
+          ...c, dist: haversine(bien.lat, bien.lng, c.lat, c.lng)
+        })).filter(c => TOP5.includes(c.nom) && c.dist > 5)
+          .sort((a,b) => a.dist - b.dist)[0];
+        if (nearestTop5) {
+          refCities.push(nearestTop5);
+          console.log('NEARBY +top5: ' + nearestTop5.nom + ' (' + nearestTop5.dist.toFixed(0) + 'km)');
+        }
+      }
+
+      const gBounds = citiesBounds(bien.lat, bien.lng, refCities);
+      const nearbyPoints = [{ lat: bien.lat, lng: bien.lng }, ...refCities.map(c => ({ lat: c.lat, lng: c.lng }))];
       mapG.fitBounds(gBounds);
       ensurePointsVisible(mapG, nearbyPoints);
       markerG = addMarker(mapG, bien.lat, bien.lng);
