@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v75</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v76</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -251,7 +251,7 @@
     <div style="padding:6px 16px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);background:#f8f8fa;">
       <button id="drawSquareBtn" onclick="toggleDrawSquare()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;">✏️ Tracer le bien</button>
       <button id="clearSquareBtn" onclick="clearSquareOverlay()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;display:none;">✕ Effacer</button>
-      <span id="drawHint" style="font-size:11px;color:var(--text-light);"></span>
+      <span id="drawHint" style="font-size:11px;color:var(--text-light);">Tracez un rectangle → il deviendra un carré parfait</span>
     </div>
   </div>
   <div class="map-card">
@@ -811,8 +811,18 @@ function findCitiesForGeneraleV4(lat, lng) {
 
 // ===== CLAMP MAP TO FRANCE — max X% outside borders =====
 function clampToFrance(map, bienLat, bienLng, maxOverflow) {
-  // France métropolitaine approximate bounds
-  const FR = { north: 51.1, south: 42.3, west: -4.8, east: 8.3 };
+  // France métropolitaine bounds
+  // West bound varies by latitude: Brittany is wide (-4.8°), south coast is narrow (-1.5°)
+  // Linear interpolation: at lat 48.5° → -4.8°, at lat 43° → -1.5°
+  const westAtLat = (lat) => {
+    if (lat >= 48.5) return -4.8;   // Bretagne
+    if (lat <= 43.0) return -1.5;   // Pays Basque
+    // Interpolation linéaire entre les deux
+    const t = (lat - 43.0) / (48.5 - 43.0);
+    return -1.5 + t * (-4.8 - (-1.5)); // -1.5 → -4.8
+  };
+  const FR = { north: 51.1, south: 42.3, west: westAtLat(bienLat), east: 8.3 };
+  console.log('Clamp France: FR.west=' + FR.west.toFixed(1) + '° pour lat=' + bienLat.toFixed(1));
 
   const bounds = map.getBounds();
   if (!bounds) return;
@@ -835,7 +845,7 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
     panLat = (FR.north + maxH) - ne.lat();
     console.log('Clamp France: pan sud ' + panLat.toFixed(2) + '° (nord hors France)');
   }
-  // West overflow (Atlantique)
+  // West overflow (Atlantique/Manche)
   if (sw.lng() < FR.west - maxW) {
     panLng = (FR.west - maxW) - sw.lng();
     console.log('Clamp France: pan est +' + panLng.toFixed(2) + '° (ouest hors France)');
@@ -1879,120 +1889,52 @@ function updateAerienneFromSelection() {
   });
 }
 
-// ===== DRAW SQUARE ON AÉRIENNE =====
-let drawingMode = false;
-let drawStartLatLng = null;
-let drawTempRect = null;
+// ===== DRAW SQUARE ON AÉRIENNE (Google DrawingManager) =====
+let drawingManager = null;
 let drawFinalSquare = null;
-let drawMouseListener = null;
-let drawClickListener = null;
+let drawingActive = false;
 
-function toggleDrawSquare() {
-  if (drawingMode) {
-    cancelDrawing();
-    return;
-  }
-  drawingMode = true;
-  document.getElementById('drawSquareBtn').style.background = '#FF6600';
-  document.getElementById('drawSquareBtn').style.color = 'white';
-  document.getElementById('drawSquareBtn').style.borderColor = '#FF6600';
-  document.getElementById('drawHint').textContent = 'Cliquez un coin, puis cliquez le coin opposé';
-  mapA.setOptions({ draggable: false, scrollwheel: false });
-
-  let clickCount = 0;
-
-  drawClickListener = mapA.addListener('click', (e) => {
-    clickCount++;
-    if (clickCount === 1) {
-      // First click: start point
-      drawStartLatLng = e.latLng;
-      document.getElementById('drawHint').textContent = 'Cliquez le coin opposé';
-    } else if (clickCount === 2) {
-      // Second click: end point → create perfect square
-      const endLatLng = e.latLng;
-      createPerfectSquare(drawStartLatLng, endLatLng);
-      finishDrawing();
-    }
-  });
-
-  // Live preview rectangle
-  drawMouseListener = mapA.addListener('mousemove', (e) => {
-    if (!drawStartLatLng) return;
-    if (drawTempRect) drawTempRect.setMap(null);
-    const start = drawStartLatLng;
-    const end = e.latLng;
-    drawTempRect = new google.maps.Rectangle({
-      bounds: {
-        north: Math.max(start.lat(), end.lat()),
-        south: Math.min(start.lat(), end.lat()),
-        east: Math.max(start.lng(), end.lng()),
-        west: Math.min(start.lng(), end.lng()),
-      },
+function initDrawingManager() {
+  if (drawingManager) return;
+  drawingManager = new google.maps.drawing.DrawingManager({
+    drawingMode: null, // inactive by default
+    drawingControl: false, // we use our own button
+    rectangleOptions: {
       strokeColor: '#FF6600',
-      strokeOpacity: 0.6,
-      strokeWeight: 1.5,
+      strokeOpacity: 0.9,
+      strokeWeight: 2.5,
       fillColor: '#FF6600',
-      fillOpacity: 0.08,
-      map: mapA,
-      clickable: false,
-    });
-  });
-}
-
-function createPerfectSquare(start, end) {
-  // Calculate center of the drawn rectangle
-  const centerLat = (start.lat() + end.lat()) / 2;
-  const centerLng = (start.lng() + end.lng()) / 2;
-
-  // Get the max dimension (width or height) in degrees
-  const dLat = Math.abs(start.lat() - end.lat());
-  const dLng = Math.abs(start.lng() - end.lng());
-
-  // Convert lng to equivalent lat distance for a true square
-  const lngToLat = Math.cos(centerLat * Math.PI / 180);
-  const dLatEquiv = dLng * lngToLat; // lng dimension in lat-equivalent
-
-  // Use the larger dimension
-  let halfSide;
-  if (dLat >= dLatEquiv) {
-    halfSide = dLat / 2;
-  } else {
-    halfSide = dLatEquiv / 2;
-  }
-
-  // Convert back to lat/lng
-  const halfLng = halfSide / lngToLat;
-
-  // Remove old square
-  if (drawFinalSquare) drawFinalSquare.setMap(null);
-
-  drawFinalSquare = new google.maps.Rectangle({
-    bounds: {
-      north: centerLat + halfSide,
-      south: centerLat - halfSide,
-      east: centerLng + halfLng,
-      west: centerLng - halfLng,
+      fillOpacity: 0.1,
+      editable: true,
+      draggable: true,
     },
-    strokeColor: '#FF6600',
-    strokeOpacity: 0.9,
-    strokeWeight: 2.5,
-    fillColor: '#FF6600',
-    fillOpacity: 0.1,
-    map: mapA,
-    editable: true, // allow resize
-    draggable: true, // allow move
   });
+  drawingManager.setMap(mapA);
 
-  document.getElementById('clearSquareBtn').style.display = 'inline-block';
+  // When a rectangle is drawn → transform to perfect square
+  google.maps.event.addListener(drawingManager, 'rectanglecomplete', (rect) => {
+    // Remove previous square
+    if (drawFinalSquare) drawFinalSquare.setMap(null);
 
-  // When user edits the square, re-square it
-  drawFinalSquare.addListener('bounds_changed', () => {
-    reSquare(drawFinalSquare);
+    // Transform to perfect square
+    makeSquare(rect);
+    drawFinalSquare = rect;
+
+    // Re-square on resize/drag
+    rect.addListener('bounds_changed', () => makeSquare(rect));
+
+    // Exit drawing mode
+    drawingManager.setDrawingMode(null);
+    drawingActive = false;
+    document.getElementById('drawSquareBtn').style.background = 'white';
+    document.getElementById('drawSquareBtn').style.color = 'var(--text)';
+    document.getElementById('drawSquareBtn').style.borderColor = 'var(--border)';
+    document.getElementById('clearSquareBtn').style.display = 'inline-block';
+    document.getElementById('drawHint').textContent = 'Carré déplaçable et redimensionnable';
   });
 }
 
-// Re-enforce perfect square after user drag/resize
-function reSquare(rect) {
+function makeSquare(rect) {
   const b = rect.getBounds();
   const ne = b.getNorthEast();
   const sw = b.getSouthWest();
@@ -2002,7 +1944,7 @@ function reSquare(rect) {
   const dLng = ne.lng() - sw.lng();
   const lngToLat = Math.cos(centerLat * Math.PI / 180);
   const dLatEquiv = dLng * lngToLat;
-  let halfSide = Math.max(dLat, dLatEquiv) / 2;
+  const halfSide = Math.max(dLat, dLatEquiv) / 2;
   const halfLng = halfSide / lngToLat;
 
   // Temporarily remove listener to avoid infinite loop
@@ -2014,29 +1956,34 @@ function reSquare(rect) {
     west: centerLng - halfLng,
   });
   // Re-add listener
-  rect.addListener('bounds_changed', () => reSquare(rect));
+  rect.addListener('bounds_changed', () => makeSquare(rect));
 }
 
-function finishDrawing() {
-  drawingMode = false;
-  if (drawTempRect) { drawTempRect.setMap(null); drawTempRect = null; }
-  if (drawClickListener) { google.maps.event.removeListener(drawClickListener); drawClickListener = null; }
-  if (drawMouseListener) { google.maps.event.removeListener(drawMouseListener); drawMouseListener = null; }
-  drawStartLatLng = null;
-  mapA.setOptions({ draggable: true, scrollwheel: true });
-  document.getElementById('drawSquareBtn').style.background = 'white';
-  document.getElementById('drawSquareBtn').style.color = 'var(--text)';
-  document.getElementById('drawSquareBtn').style.borderColor = 'var(--border)';
-  document.getElementById('drawHint').textContent = '';
-}
-
-function cancelDrawing() {
-  finishDrawing();
+function toggleDrawSquare() {
+  initDrawingManager();
+  if (drawingActive) {
+    // Cancel drawing
+    drawingManager.setDrawingMode(null);
+    drawingActive = false;
+    document.getElementById('drawSquareBtn').style.background = 'white';
+    document.getElementById('drawSquareBtn').style.color = 'var(--text)';
+    document.getElementById('drawSquareBtn').style.borderColor = 'var(--border)';
+    return;
+  }
+  drawingActive = true;
+  drawingManager.setDrawingMode(google.maps.drawing.OverlayType.RECTANGLE);
+  document.getElementById('drawSquareBtn').style.background = '#FF6600';
+  document.getElementById('drawSquareBtn').style.color = 'white';
+  document.getElementById('drawSquareBtn').style.borderColor = '#FF6600';
+  document.getElementById('drawHint').textContent = 'Tracez un rectangle sur la carte';
 }
 
 function clearSquareOverlay() {
   if (drawFinalSquare) { drawFinalSquare.setMap(null); drawFinalSquare = null; }
+  if (drawingManager) { drawingManager.setMap(null); drawingManager = null; }
+  drawingActive = false;
   document.getElementById('clearSquareBtn').style.display = 'none';
+  document.getElementById('drawHint').textContent = 'Tracez un rectangle → il deviendra un carré parfait';
 }
 
 function quickTest(address) {
@@ -2049,7 +1996,7 @@ function onGoogleMapsReady() {
 }
 </script>
 
-<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g&callback=onGoogleMapsReady"></script>
+<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g&libraries=drawing&callback=onGoogleMapsReady"></script>
 
 </body>
 </html>
