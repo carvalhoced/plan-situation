@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v78</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v79</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -251,6 +251,7 @@
     <div class="map-container" id="mapAerienne"></div>
     <div style="padding:6px 16px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);background:#f8f8fa;">
       <button id="drawRectBtn" onclick="toggleDrawRect()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;">✏️ Délimiter le bien</button>
+      <button id="clearRectBtn" onclick="clearAndRestoreCadastre()" style="padding:4px 12px;border:1.5px solid var(--border);border-radius:6px;background:white;font-family:'Ubuntu',sans-serif;font-size:11px;font-weight:500;color:var(--text);cursor:pointer;display:none;">✕ Effacer</button>
       <span id="drawHint" style="font-size:11px;color:var(--text-light);">Tracez un rectangle sur la vue aérienne</span>
     </div>
   </div>
@@ -867,7 +868,7 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
 
   // After pan, ensure pin is still visible with 10% margin
   google.maps.event.addListenerOnce(map, 'idle', () => {
-    checkAndPanForMargin(map, [{ lat: bienLat, lng: bienLng }], 0.15);
+    checkAndPanForMargin(map, [{ lat: bienLat, lng: bienLng }], 0.20);
   });
 }
 
@@ -886,13 +887,13 @@ function citiesBounds(lat, lng, cities, padding = 0.10) {
   return bounds;
 }
 
-function ensurePointsVisible(map, points, margin = 0.15) {
+function ensurePointsVisible(map, points, margin = 0.20) {
   google.maps.event.addListenerOnce(map, 'idle', () => {
     checkAndPanForMargin(map, points, margin);
   });
 }
 
-function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.10) {
+function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.20) {
   google.maps.event.addListenerOnce(map, 'idle', () => {
     map.setZoom(map.getZoom() + 1);
     google.maps.event.addListenerOnce(map, 'idle', () => {
@@ -1382,7 +1383,7 @@ async function go() {
           const sw = bounds.getSouthWest();
           const h = ne.lat() - sw.lat();
           const w = ne.lng() - sw.lng();
-          const margin = 0.10;
+          const margin = 0.20;
           if (bien.lat - sw.lat() < h * margin || ne.lat() - bien.lat < h * margin ||
               bien.lng - sw.lng() < w * margin || ne.lng() - bien.lng < w * margin) {
             console.log('SAFETY PIN: ' + label + ' — pin trop proche du bord, pan');
@@ -1929,6 +1930,7 @@ function initDrawingManager() {
     document.getElementById('drawRectBtn').style.background = 'white';
     document.getElementById('drawRectBtn').style.color = 'var(--text)';
     document.getElementById('drawRectBtn').style.borderColor = 'var(--border)';
+    document.getElementById('clearRectBtn').style.display = 'inline-block';
     document.getElementById('drawHint').textContent = 'Rectangle déplaçable et redimensionnable';
   });
 }
@@ -1955,6 +1957,22 @@ function clearRectOverlay() {
   if (drawFinalRect) { drawFinalRect.setMap(null); drawFinalRect = null; }
   if (drawingManager) { drawingManager.setMap(null); drawingManager = null; }
   drawingActive = false;
+}
+
+function clearAndRestoreCadastre() {
+  // Remove rectangle
+  clearRectOverlay();
+  document.getElementById('clearRectBtn').style.display = 'none';
+  document.getElementById('drawHint').textContent = 'Tracez un rectangle sur la vue aérienne';
+
+  // Restore cadastre contour from selected parcels
+  clearPolygons(currentPolygonsA);
+  if (selectedParcels.length > 0) {
+    selectedParcels.forEach(sp => {
+      drawTrackedPolygon(mapA, sp.feature, '#521DA5', currentPolygonsA);
+    });
+    console.log('Cadastre contour restauré (' + selectedParcels.length + ' parcelles)');
+  }
 }
 
 function quickTest(address) {
