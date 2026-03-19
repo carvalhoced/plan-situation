@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v68</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v69</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -902,8 +902,8 @@ function checkAndPanForMargin(map, points, margin) {
 // │               (boundsWidth * 256)))                                  │
 // │        Viewport fixe 4:3 (ex: 800x600 px)                           │
 // │      - Clamp zoom selon les règles :                                │
-// │        Particulière standard → 13-15                                │
-// │        Particulière commune < 2km → 13-16                           │
+// │        Particulière standard → 14-15                                │
+// │        Particulière commune < 2km → 14-16                           │
 // │        Aérienne → 19                                                │
 // │        Cadastre → 19                                                │
 // └─────────────────────────────────────────────────────────────────────┘
@@ -958,7 +958,7 @@ function checkAndPanForMargin(map, points, margin) {
 // │     → contour arrondissement + zoom+1, cap 16                       │
 // │   - Autres communes :                                               │
 // │     → fitBounds(bien, centre-ville commune)                         │
-// │     → zoom clamp 13-15 (standard), 13-16 (commune < 2km)           │
+// │     → zoom clamp 14-15 (standard), 14-16 (commune < 2km)           │
 // │     → margin 20% pour les 2 points                                  │
 // │                                                                     │
 // │ VUE AÉRIENNE : zoom 19, satellite, tilt 0                           │
@@ -1367,7 +1367,7 @@ async function doParticuliereAlgo2(bien) {
     google.maps.event.addListenerOnce(mapP, 'idle', () => {
       let z = mapP.getZoom();
       if (z > zoomMax) mapP.setZoom(zoomMax);
-      else if (z < 13) mapP.setZoom(13);
+      else if (z < 14) mapP.setZoom(14);
 
       // After zoom clamp settles → ensure both points have 20% margin
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
