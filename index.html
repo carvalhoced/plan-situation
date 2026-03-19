@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v70</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v71</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -232,7 +232,8 @@
     <div class="algo-tabs" id="algoTabsG">
       <button class="algo-tab" onclick="switchAlgoG(1)">Algo 1 — Top 10</button>
       <button class="algo-tab" onclick="switchAlgoG(2)">Algo 2 — Progressif</button>
-      <button class="algo-tab active" onclick="switchAlgoG(3)">Algo 3 — Villes > 150k</button>
+      <button class="algo-tab" onclick="switchAlgoG(3)">Algo 3 — Top 5</button>
+      <button class="algo-tab active" onclick="switchAlgoG(4)">Algo 4 — Zoom 7</button>
     </div>
     <div class="map-container" id="mapGeneral"></div>
   </div>
@@ -275,7 +276,7 @@ let markerG, markerP, markerA;
 let currentPolygonsA = [];
 
 // Current algo selections
-let currentAlgoG = '3';
+let currentAlgoG = '4';
 let currentAlgoP = '2';
 let lastAddress = '';
 let lastBienData = null;
@@ -753,6 +754,46 @@ function findCitiesForGeneraleV3(lat, lng) {
   return { cities, phase: phase + ' → ' + names };
 }
 
+// ===== ALGO 4 — Zoom 7 fixe, toujours une TOP3 visible =====
+function findCitiesForGeneraleV4(lat, lng) {
+  const TOP3 = ['Paris', 'Marseille', 'Lyon'];
+  const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
+
+  const top10WithDist = TOP10_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
+
+  const allCitiesWithDist = MAJOR_CITIES.map(c => ({
+    ...c, dist: haversine(lat, lng, c.lat, c.lng)
+  })).filter(c => c.dist > 5).sort((a,b) => a.dist - b.dist);
+
+  const cities = [];
+
+  // 1. Always include nearest TOP3 (Paris/Marseille/Lyon)
+  const nearestTop3 = top10WithDist
+    .filter(c => TOP3.includes(c.nom))[0];
+  if (nearestTop3) cities.push(nearestTop3);
+
+  // 2. If 2nd TOP5 is within 125% distance of 1st, add it too
+  const top5Sorted = top10WithDist.filter(c => TOP5.includes(c.nom));
+  if (top5Sorted.length >= 2 && cities.length > 0) {
+    const second = top5Sorted.find(c => c.nom !== cities[0].nom);
+    if (second && second.dist <= cities[0].dist * 1.25) {
+      cities.push(second);
+      console.log('Algo4: 2ème top5 ' + second.nom + ' à ' + second.dist.toFixed(0) + 'km (≤125% de ' + cities[0].dist.toFixed(0) + 'km)');
+    }
+  }
+
+  // 3. Add nearest city > 150k not already in list
+  const nearest150k = allCitiesWithDist
+    .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
+    .slice(0, 1);
+  cities.push(...nearest150k);
+
+  const names = cities.map(c => c.nom + ' (' + (c.pop/1000).toFixed(0) + 'k, ' + c.dist.toFixed(0) + 'km)').join(', ');
+  return { cities, phase: 'Zoom 7 · ' + names, fixedZoom: 7 };
+}
+
 function citiesBounds(lat, lng, cities, padding = 0.10) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend({ lat, lng });
@@ -1139,16 +1180,23 @@ async function go() {
         }
         ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
       } else {
-        const result = (selectedAlgo === '3')
-          ? findCitiesForGeneraleV3(bien.lat, bien.lng)
-          : (selectedAlgo === '2')
-            ? findCitiesForGeneraleV2(bien.lat, bien.lng)
-            : findCitiesForGenerale(bien.lat, bien.lng);
+        const result = (selectedAlgo === '4')
+          ? findCitiesForGeneraleV4(bien.lat, bien.lng)
+          : (selectedAlgo === '3')
+            ? findCitiesForGeneraleV3(bien.lat, bien.lng)
+            : (selectedAlgo === '2')
+              ? findCitiesForGeneraleV2(bien.lat, bien.lng)
+              : findCitiesForGenerale(bien.lat, bien.lng);
         gCities = result.cities;
         algoPhase = result.phase;
         console.log(`Algo ${selectedAlgo}: ${algoPhase} → ${gCities.map(c => c.nom + ' (' + c.dist.toFixed(0) + 'km)').join(', ')}`);
 
-        if (gCities.length > 0) {
+        if (result.fixedZoom) {
+          // Algo 4: zoom fixe, centré sur le bien
+          mapG.setCenter({ lat: bien.lat, lng: bien.lng });
+          mapG.setZoom(result.fixedZoom);
+          ensurePointsVisible(mapG, [{ lat: bien.lat, lng: bien.lng }]);
+        } else if (gCities.length > 0) {
           const gBounds = citiesBounds(bien.lat, bien.lng, gCities);
           const allPoints = [{ lat: bien.lat, lng: bien.lng }, ...gCities.map(c => ({ lat: c.lat, lng: c.lng }))];
           mapG.fitBounds(gBounds);
@@ -1350,8 +1398,10 @@ async function doParticuliereAlgo2(bien) {
       console.log(communeName + ' algo2 bbox: ' + size.max.toFixed(1) + 'km → zoomMax ' + zoomMax);
     }
 
-    // Get centre-ville via Google Geocoder
-    const center = await getGoogleCenterLocation(communeName, bien.lat, bien.lng);
+    // Get centre-ville via Google Geocoder (with postal code for disambiguation)
+    const postalCode = (lastAddress || '').match(/\b(\d{5})\b/);
+    const searchName = postalCode ? communeName + ' ' + postalCode[1] : communeName;
+    const center = await getGoogleCenterLocation(searchName, bien.lat, bien.lng);
     if (!center) {
       console.warn('Algo2: pas de centre-ville Google, fallback algo1');
       return await doParticuliereStandard(bien);
