@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v79</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v81</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -274,12 +274,24 @@
   </div>
 </div>
 
+<div id="captureSection" style="display:none;margin-bottom:24px;">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+    <button onclick="captureAllMaps()" style="padding:10px 20px;background:var(--primary);color:white;border:none;border-radius:8px;font-family:'Ubuntu',sans-serif;font-size:13px;font-weight:600;cursor:pointer;">📸 Capturer les 4 cartes (Static Maps API)</button>
+    <span id="captureStatus" style="font-size:12px;color:var(--text-light);"></span>
+  </div>
+  <div id="captureResults" style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;"></div>
+</div>
+
 <script>
 const API_KEY = 'AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g';
 
 let mapG, mapP, mapA, mapC;
 let markerG, markerP, markerA;
 let currentPolygonsA = [];
+
+// Store polygon coordinate data for Static Maps API export
+let _communeContourCoords = null;  // [{lat,lng}] — commune contour on Particulière
+let _parcelleCoords = [];          // [[{lat,lng}]] — parcelle contours on Aérienne
 
 // Current algo selections
 let currentAlgoG = '4';
@@ -495,6 +507,9 @@ function drawCommuneContour(map, geojson) {
     : geojson.coordinates[0];
 
   const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+
+  // Store for Static Maps export
+  if (map === mapP) _communeContourCoords = path;
 
   new google.maps.Polygon({
     paths: path,
@@ -1310,6 +1325,8 @@ async function go() {
     clearPolygons(currentPolygonsA);
     clearViewportParcels();
     clearRectOverlay();
+    _parcelleCoords = [];
+    _communeContourCoords = null;
 
     try {
       const parcelle = await fetchParcelleCadastre(bien.lat, bien.lng);
@@ -1593,6 +1610,9 @@ function getGoogleCenterLocation(placeName, bienLat, bienLng) {
 function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreRef, algoPhase) {
   lastBienData = bien;
   document.getElementById('algoPanel').style.display = 'block';
+  document.getElementById('captureSection').style.display = 'block';
+  document.getElementById('captureResults').innerHTML = '';
+  document.getElementById('captureStatus').textContent = '';
 
   if (top10 && top10.mode === 'inside') {
     document.getElementById('algoGeneral').innerHTML = `<h4>Générale</h4>
@@ -1673,6 +1693,9 @@ function drawTrackedPolygon(map, feature, color, trackArr) {
     ? geom.coordinates[0][0]
     : geom.coordinates[0];
   const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+
+  // Store for Static Maps export (aérienne only)
+  if (map === mapA) _parcelleCoords.push(path);
 
   const poly = new google.maps.Polygon({
     paths: path,
@@ -1973,6 +1996,171 @@ function clearAndRestoreCadastre() {
     });
     console.log('Cadastre contour restauré (' + selectedParcels.length + ' parcelles)');
   }
+}
+
+// ===== CAPTURE MAPS VIA GOOGLE STATIC MAPS API =====
+
+// Simplify a path to max N points (take every Mth point)
+function simplifyPath(coords, maxPoints) {
+  if (coords.length <= maxPoints) return coords;
+  const step = Math.ceil(coords.length / maxPoints);
+  const simplified = [];
+  for (let i = 0; i < coords.length; i += step) {
+    simplified.push(coords[i]);
+  }
+  // Always include last point to close the polygon
+  if (simplified[simplified.length - 1] !== coords[coords.length - 1]) {
+    simplified.push(coords[coords.length - 1]);
+  }
+  return simplified;
+}
+
+// Build path parameter for Static Maps API from coords array
+function buildPathParam(coords, strokeColor, fillColor, weight, maxPoints) {
+  const simplified = simplifyPath(coords, maxPoints || 80);
+  const color = strokeColor.replace('#', '0x') + 'CC';
+  const fill = fillColor ? fillColor.replace('#', '0x') + '30' : '';
+  let param = `color:${color}|weight:${weight || 2}`;
+  if (fill) param += `|fillcolor:${fill}`;
+  simplified.forEach(p => { param += `|${p.lat.toFixed(5)},${p.lng.toFixed(5)}`; });
+  return param;
+}
+
+function buildStaticMapUrl(map, mapType, extraPaths, showMarker) {
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const bien = lastBienData;
+
+  let url = 'https://maps.googleapis.com/maps/api/staticmap?'
+    + `center=${center.lat().toFixed(5)},${center.lng().toFixed(5)}`
+    + `&zoom=${zoom}`
+    + `&size=640x480`
+    + `&scale=2`
+    + `&maptype=${mapType}`
+    + `&key=${API_KEY}`;
+
+  // Marker
+  if (showMarker && bien) {
+    url += `&markers=color:0xFF6600|${bien.lat.toFixed(5)},${bien.lng.toFixed(5)}`;
+  }
+
+  // Paths (polygons)
+  if (extraPaths) {
+    extraPaths.forEach(p => {
+      url += `&path=${encodeURIComponent(p)}`;
+    });
+  }
+
+  return url;
+}
+
+function captureAllMaps() {
+  const statusEl = document.getElementById('captureStatus');
+  const resultsEl = document.getElementById('captureResults');
+  resultsEl.innerHTML = '';
+  statusEl.textContent = 'Génération des URLs Static Maps…';
+
+  const bien = lastBienData;
+  if (!bien) { statusEl.textContent = 'Aucune adresse géocodée'; return; }
+
+  const captures = [];
+
+  // 1. Situation Générale — roadmap, marker, no polygons
+  captures.push({
+    label: 'Situation Générale',
+    url: buildStaticMapUrl(mapG, 'roadmap', [], true),
+  });
+
+  // 2. Situation Particulière — roadmap, marker, commune contour
+  const pPaths = [];
+  if (_communeContourCoords && _communeContourCoords.length > 0) {
+    pPaths.push(buildPathParam(_communeContourCoords, '#521DA5', '', 2, 100));
+  }
+  captures.push({
+    label: 'Situation Particulière',
+    url: buildStaticMapUrl(mapP, 'roadmap', pPaths, true),
+  });
+
+  // 3. Vue Aérienne — satellite, parcelle contours or user rectangle
+  const aPaths = [];
+  if (drawFinalRect) {
+    // User-drawn rectangle
+    const b = drawFinalRect.getBounds();
+    const ne = b.getNorthEast();
+    const sw = b.getSouthWest();
+    const rectCoords = [
+      { lat: ne.lat(), lng: sw.lng() },
+      { lat: ne.lat(), lng: ne.lng() },
+      { lat: sw.lat(), lng: ne.lng() },
+      { lat: sw.lat(), lng: sw.lng() },
+      { lat: ne.lat(), lng: sw.lng() },
+    ];
+    aPaths.push(buildPathParam(rectCoords, '#FF6600', '#FF6600', 2));
+  } else if (_parcelleCoords.length > 0) {
+    // Parcelle contours
+    _parcelleCoords.forEach(coords => {
+      aPaths.push(buildPathParam(coords, '#521DA5', '#521DA5', 2, 60));
+    });
+  }
+  captures.push({
+    label: 'Vue Aérienne',
+    url: buildStaticMapUrl(mapA, 'satellite', aPaths, false),
+  });
+
+  // 4. Plan Cadastral — NOTE: IGN tiles not available in Static Maps
+  // Use roadmap as base + parcelle contour, closest equivalent
+  const cPaths = [];
+  if (selectedParcels.length > 0) {
+    selectedParcels.forEach(sp => {
+      const geom = sp.feature.geometry;
+      const coords = geom.type === 'MultiPolygon'
+        ? geom.coordinates[0][0] : geom.coordinates[0];
+      const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
+      cPaths.push(buildPathParam(path, '#E5007D', '#E5007D', 2, 60));
+    });
+  }
+  captures.push({
+    label: 'Plan Cadastral',
+    url: buildStaticMapUrl(mapC, 'roadmap', cPaths, false),
+    note: '⚠ Tuiles IGN non disponibles via Static Maps — parcelles uniquement',
+  });
+
+  // Render results
+  captures.forEach((c, i) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:white;border:1px solid var(--border);border-radius:8px;overflow:hidden;';
+
+    const title = document.createElement('div');
+    title.style.cssText = 'padding:8px 12px;font-size:12px;font-weight:600;color:var(--primary);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;';
+    const dl = document.createElement('a');
+    dl.href = c.url;
+    dl.target = '_blank';
+    dl.download = c.label.replace(/ /g, '_') + '.png';
+    dl.textContent = '⬇ PNG';
+    dl.style.cssText = 'font-size:11px;color:var(--primary);text-decoration:none;border:1px solid var(--border);padding:3px 8px;border-radius:4px;';
+    title.textContent = c.label + ' ';
+    title.appendChild(dl);
+
+    const img = document.createElement('img');
+    img.src = c.url;
+    img.style.cssText = 'width:100%;display:block;';
+    img.onerror = () => { img.style.display = 'none'; title.textContent = c.label + ' — erreur de chargement'; };
+
+    card.appendChild(title);
+    card.appendChild(img);
+
+    if (c.note) {
+      const noteEl = document.createElement('div');
+      noteEl.style.cssText = 'padding:6px 12px;font-size:11px;color:var(--text-light);background:#fffbe6;border-top:1px solid #f0e6b8;';
+      noteEl.textContent = c.note;
+      card.appendChild(noteEl);
+    }
+
+    resultsEl.appendChild(card);
+  });
+
+  statusEl.textContent = '✓ 4 captures générées via Static Maps API — clic droit ou ⬇ pour télécharger';
+  console.log('Static Maps URLs:', captures.map(c => c.label + ': ' + c.url.length + ' chars'));
 }
 
 function quickTest(address) {
