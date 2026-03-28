@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v82</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v83</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -344,11 +344,8 @@ function extractDeptFromAddress(address) {
   const match = address.match(/\b(\d{5})\b/);
   if (!match) return '';
   const cp = match[1];
-  // DOM-TOM: 971xx→971, 972xx→972, etc.
   if (cp.startsWith('97')) return cp.substring(0, 3);
-  // Corse: 20000-20190 → 2A, 20200+ → 2B
   if (cp.startsWith('20')) return parseInt(cp) >= 20200 ? '2B' : '2A';
-  // Métropole: 2 premiers chiffres
   return cp.substring(0, 2);
 }
 
@@ -389,24 +386,23 @@ function initMaps() {
   mapA = new google.maps.Map(document.getElementById('mapAerienne'), {
     ...mapOpts, mapTypeId: 'satellite', zoom: 19, tilt: 0
   });
-  const ignBase = new google.maps.ImageMapType({
-    getTileUrl: function(coord, zoom) {
-      return 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX=' + zoom + '&TILEROW=' + coord.y + '&TILECOL=' + coord.x;
-    },
-    tileSize: new google.maps.Size(256, 256),
-    name: 'IGN',
-    maxZoom: 19,
-  });
-  ignBase.name = 'IGN';
-  ignBase.alt = 'Plan IGN';
 
+  // v83: fond Google roadmap + overlay cadastre IGN (au lieu de fond IGN)
   mapC = new google.maps.Map(document.getElementById('mapCadastre'), {
-    ...mapOpts, disableDoubleClickZoom: true, maxZoom: 19,
+    ...mapOpts,
+    mapTypeId: 'roadmap',
+    disableDoubleClickZoom: true,
+    maxZoom: 19,
     clickableIcons: false,
-    mapTypeControlOptions: { mapTypeIds: ['IGN'] },
+    styles: [
+      // Atténuer le fond Google pour que le cadastre ressorte mieux
+      { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+      { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+      { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+      { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#d4e4f7' }] },
+      { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
+    ],
   });
-  mapC.mapTypes.set('IGN', ignBase);
-  mapC.setMapTypeId('IGN');
   mapC.overlayMapTypes.push(createCadastreOverlay());
 
   let cadastreIdleTimer = null;
@@ -509,7 +505,6 @@ function drawCommuneContour(map, geojson) {
 
   const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
 
-  // Store for Static Maps export
   if (map === mapP) _communeContourCoords = path;
 
   new google.maps.Polygon({
@@ -524,8 +519,7 @@ function drawCommuneContour(map, geojson) {
 
 // ===== FETCH PARCELLE CADASTRALE =====
 async function fetchParcelleCadastre(lat, lng) {
-  // Try 3m first, fallback to 5m if nothing found
-  const radii = [0.00003, 0.00005]; // ~3m, ~5m
+  const radii = [0.00003, 0.00005];
   for (const d of radii) {
     const geom = JSON.stringify({
       type: 'Polygon',
@@ -645,7 +639,6 @@ const TOP10_CITIES = [
 
 function detectTop10(lat, lng) {
   const NEARBY_RADIUS = 30;
-  // Only TOP3 get the INSIDE (close-up) view
   const INSIDE_CITIES = ['Paris', 'Marseille', 'Lyon'];
   for (const c of TOP10_CITIES) {
     const dist = haversine(lat, lng, c.lat, c.lng);
@@ -653,14 +646,12 @@ function detectTop10(lat, lng) {
       if (INSIDE_CITIES.includes(c.nom)) {
         return { city: { ...c, dist }, mode: 'inside' };
       }
-      // Non-TOP3 city: skip entirely, let it fall through to STANDARD → algo 4
       continue;
     }
     if (dist <= NEARBY_RADIUS) {
       if (INSIDE_CITIES.includes(c.nom)) {
         return { city: { ...c, dist }, mode: 'nearby' };
       }
-      // Non-TOP3 nearby: also skip to STANDARD
       continue;
     }
   }
@@ -700,7 +691,6 @@ function findCitiesForGenerale(lat, lng) {
   return { cities, phase: '2 métropoles > 100k' };
 }
 
-// ===== ALGO 2 — Progressif 3 phases =====
 function findCitiesForGeneraleV2(lat, lng) {
   const top10WithDist = TOP10_CITIES.map(c => ({
     ...c, dist: haversine(lat, lng, c.lat, c.lng)
@@ -730,7 +720,6 @@ function findCitiesForGeneraleV2(lat, lng) {
   return { cities: refCities, phase: 'P3: 2 villes référence' };
 }
 
-// ===== ALGO 3 — Toujours une TOP5 visible =====
 function findCitiesForGeneraleV3(lat, lng) {
   const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
 
@@ -748,34 +737,27 @@ function findCitiesForGeneraleV3(lat, lng) {
   let cities = [];
   let phase = '';
 
-  // Phase 1: Top 10 < 40km → that city
   if (nearestTop10 && nearestTop10.dist < 40) {
     cities = [nearestTop10];
     phase = 'P1: top10 < 40km';
-  }
-  // Phase 2: Top 10 40-100km → that top10 + nearest city > 90k
-  else if (nearestTop10 && nearestTop10.dist <= 100) {
+  } else if (nearestTop10 && nearestTop10.dist <= 100) {
     const nearby90k = allCitiesWithDist
       .filter(c => c.pop >= 90000 && c.nom !== nearestTop10.nom)
       .slice(0, 1);
     cities = [nearestTop10, ...nearby90k];
     phase = 'P2: top10 < 100km';
-  }
-  // Phase 3: > 100km → nearest top5 + ville > 150k
-  else {
+  } else {
     if (nearestTop5) cities.push(nearestTop5);
     const nearest150k = allCitiesWithDist
       .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
       .slice(0, 1);
     cities.push(...nearest150k);
-    // Bonus: ville > 100k within 50km
     const nearbyCities = allCitiesWithDist
       .filter(c => c.pop >= 100000 && c.dist < 50 && !cities.some(r => r.nom === c.nom));
     cities.push(...nearbyCities);
     phase = 'P3';
   }
 
-  // GARANTIE: toujours au moins une TOP5 dans le cadrage
   const hasTop5 = cities.some(c => TOP5.includes(c.nom));
   if (!hasTop5 && nearestTop5) {
     cities.push(nearestTop5);
@@ -786,7 +768,6 @@ function findCitiesForGeneraleV3(lat, lng) {
   return { cities, phase: phase + ' → ' + names };
 }
 
-// ===== ALGO 4 — Zoom 7 fixe, toujours une TOP3 visible =====
 function findCitiesForGeneraleV4(lat, lng) {
   const TOP3 = ['Paris', 'Marseille', 'Lyon'];
   const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
@@ -801,12 +782,10 @@ function findCitiesForGeneraleV4(lat, lng) {
 
   const cities = [];
 
-  // 1. Always include nearest TOP3 (Paris/Marseille/Lyon)
   const nearestTop3 = top10WithDist
     .filter(c => TOP3.includes(c.nom))[0];
   if (nearestTop3) cities.push(nearestTop3);
 
-  // 2. If 2nd TOP5 is within 125% distance of 1st, add it too
   const top5Sorted = top10WithDist.filter(c => TOP5.includes(c.nom));
   if (top5Sorted.length >= 2 && cities.length > 0) {
     const second = top5Sorted.find(c => c.nom !== cities[0].nom);
@@ -816,7 +795,6 @@ function findCitiesForGeneraleV4(lat, lng) {
     }
   }
 
-  // 3. Add nearest city > 150k not already in list
   const nearest150k = allCitiesWithDist
     .filter(c => c.pop >= 150000 && !cities.some(r => r.nom === c.nom))
     .slice(0, 1);
@@ -826,21 +804,15 @@ function findCitiesForGeneraleV4(lat, lng) {
   return { cities, phase: 'Zoom 7 · ' + names, fixedZoom: 7 };
 }
 
-// ===== CLAMP MAP TO FRANCE — max X% outside borders =====
 function clampToFrance(map, bienLat, bienLng, maxOverflow) {
-  // France métropolitaine bounds
-  // West bound varies by latitude to follow the Atlantic coastline
-  // Piecewise: Bretagne stays wide (cities on coast), south coast is narrow
   const westAtLat = (lat) => {
-    if (lat >= 47.5) return -4.5;   // Bretagne (Brest, Quimper)
-    if (lat <= 43.5) return -1.0;   // Pays Basque
-    // Interpolation between 43.5 (-1.0°) and 47.5 (-4.5°)
+    if (lat >= 47.5) return -4.5;
+    if (lat <= 43.5) return -1.0;
     const t = (lat - 43.5) / (47.5 - 43.5);
     return -1.0 + t * (-4.5 - (-1.0));
   };
   const FR = { north: 51.1, south: 42.3, west: westAtLat(bienLat), east: 8.3 };
 
-  // If bien is far inland (> 2° east of the coast), reduce west overflow tolerance
   const westOverflow = (bienLng > FR.west + 2) ? maxOverflow * 0.5 : maxOverflow;
   console.log('Clamp France: FR.west=' + FR.west.toFixed(1) + '° westOverflow=' + (westOverflow*100).toFixed(0) + '% pour lat=' + bienLat.toFixed(1));
 
@@ -852,26 +824,22 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
   const w = ne.lng() - sw.lng();
   const maxH = h * maxOverflow;
   const maxW = w * maxOverflow;
-  const maxWwest = w * westOverflow; // tighter for Atlantic coast when bien is inland
+  const maxWwest = w * westOverflow;
 
   let panLat = 0, panLng = 0;
 
-  // South overflow (Espagne, Andorre)
   if (sw.lat() < FR.south - maxH) {
     panLat = (FR.south - maxH) - sw.lat();
     console.log('Clamp France: pan nord +' + panLat.toFixed(2) + '° (sud hors France)');
   }
-  // North overflow (Belgique, UK)
   if (ne.lat() > FR.north + maxH) {
     panLat = (FR.north + maxH) - ne.lat();
     console.log('Clamp France: pan sud ' + panLat.toFixed(2) + '° (nord hors France)');
   }
-  // West overflow (Atlantique/Manche) — tighter when inland
   if (sw.lng() < FR.west - maxWwest) {
     panLng = (FR.west - maxWwest) - sw.lng();
     console.log('Clamp France: pan est +' + panLng.toFixed(2) + '° (ouest hors France)');
   }
-  // East overflow (Allemagne, Suisse, Italie)
   if (ne.lng() > FR.east + maxW) {
     panLng = (FR.east + maxW) - ne.lng();
     console.log('Clamp France: pan ouest ' + panLng.toFixed(2) + '° (est hors France)');
@@ -882,7 +850,6 @@ function clampToFrance(map, bienLat, bienLng, maxOverflow) {
     map.panTo({ lat: center.lat() + panLat, lng: center.lng() + panLng });
   }
 
-  // After pan, ensure pin is still visible with 10% margin
   google.maps.event.addListenerOnce(map, 'idle', () => {
     checkAndPanForMargin(map, [{ lat: bienLat, lng: bienLng }], 0.20);
   });
@@ -914,7 +881,6 @@ function zoomPlusThenEnsurePin(map, lat, lng, margin = 0.20) {
     map.setZoom(map.getZoom() + 1);
     google.maps.event.addListenerOnce(map, 'idle', () => {
       checkAndPanForMargin(map, [{ lat, lng }], margin);
-      // Release maxZoom so user can zoom manually
       map.setOptions({ maxZoom: null });
     });
   });
@@ -929,16 +895,13 @@ function checkAndPanForMargin(map, points, margin) {
   const h = ne.lat() - sw.lat();
   const w = ne.lng() - sw.lng();
 
-  // Primary points (pin, ref cities) get full margin
   const primaryMarginH = h * margin;
   const primaryMarginW = w * margin;
 
-  // TOP10 cities in viewport get reduced margin (5%) — just enough not to be clipped
   const cityMargin = 0.05;
   const cityMarginH = h * cityMargin;
   const cityMarginW = w * cityMargin;
 
-  // Collect TOP10 cities near viewport (Générale only)
   const cityPoints = [];
   if (map === mapG) {
     for (const c of TOP10_CITIES) {
@@ -955,7 +918,6 @@ function checkAndPanForMargin(map, points, margin) {
 
   let panLat = 0, panLng = 0;
 
-  // Primary points: full margin
   for (const p of points) {
     const gapS = p.lat - sw.lat();
     if (gapS < primaryMarginH) panLat = Math.min(panLat, -(primaryMarginH - gapS));
@@ -967,7 +929,6 @@ function checkAndPanForMargin(map, points, margin) {
     if (gapE < primaryMarginW) panLng = Math.max(panLng, (primaryMarginW - gapE));
   }
 
-  // TOP10 cities: reduced margin (don't override stronger pan from primary)
   for (const p of cityPoints) {
     const gapS = p.lat - sw.lat();
     if (gapS < cityMarginH) panLat = Math.min(panLat, -(cityMarginH - gapS));
@@ -986,122 +947,6 @@ function checkAndPanForMargin(map, points, margin) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// ANGULAR/.NET — ARCHITECTURE BACK/FRONT POUR LES PLANS DE SITUATION
-// ═══════════════════════════════════════════════════════════════════════════
-//
-// Dans le proto, TOUT est fait côté client (appels API + calcul + rendu).
-// En prod Angular/.NET, séparer en 2 couches :
-//
-// ┌─────────────────────────────────────────────────────────────────────┐
-// │ BACKEND .NET — Endpoint: POST /api/plans-situation                 │
-// │                                                                     │
-// │ Input:  { adresse: string }                                         │
-// │ Output: {                                                           │
-// │   bien: { lat, lng, display, dept },                                │
-// │   generale: {                                                       │
-// │     center: { lat, lng },                                           │
-// │     zoom: number,                                                   │
-// │     // OU bounds: { sw: {lat,lng}, ne: {lat,lng} }                  │
-// │     mode: 'inside' | 'nearby' | 'standard' | 'territoire',         │
-// │     refCities: [{ nom, lat, lng, dist }],                           │
-// │     phase: string                                                   │
-// │   },                                                                │
-// │   particuliere: {                                                   │
-// │     center: { lat, lng },                                           │
-// │     zoom: number,                                                   │
-// │     communeName: string,                                            │
-// │     contour: GeoJSON   // contour de la commune pour affichage      │
-// │   },                                                                │
-// │   aerienne: { center: { lat, lng }, zoom: 19 },                     │
-// │   cadastre: {                                                       │
-// │     center: { lat, lng },                                           │
-// │     zoom: 19,                                                       │
-// │     parcelle: GeoJSON,  // parcelle initiale                        │
-// │     ref: { section, numero, codeInsee, contenance }                 │
-// │   }                                                                 │
-// │ }                                                                   │
-// │                                                                     │
-// │ Appels serveur (parallélisables) :                                  │
-// │   1. BAN API → géocodage (lat, lng, dept)                           │
-// │   2. geo.api.gouv.fr → contour commune + arrondissement             │
-// │   3. Google Geocoder → centre-ville de la commune (Particulière)    │
-// │   4. IGN apicarto → parcelle cadastrale                             │
-// │   5. Calcul algo (pur code, pas d'appel externe) :                  │
-// │      - detectTop10(lat, lng) → mode inside/nearby/standard          │
-// │      - getTerritory(dept) → Corse, DOM-TOM                          │
-// │      - findCitiesForGeneraleV3(lat, lng) → P1/P2/P3                 │
-// │      - communeSizeKm(contour) → taille commune                      │
-// │      - Calcul du zoom optimal :                                     │
-// │        zoom = floor(log2(360 * viewportWidth /                      │
-// │               (boundsWidth * 256)))                                  │
-// │        Viewport fixe 4:3 (ex: 800x600 px)                           │
-// │      - Clamp zoom selon les règles :                                │
-// │        Particulière standard → 14-15                                │
-// │        Particulière commune < 2km → 14-16                           │
-// │        Aérienne → 19                                                │
-// │        Cadastre → 19                                                │
-// └─────────────────────────────────────────────────────────────────────┘
-//
-// ┌─────────────────────────────────────────────────────────────────────┐
-// │ FRONTEND ANGULAR — Composant MapViewer                              │
-// │                                                                     │
-// │ Le front reçoit le payload et fait UNIQUEMENT :                     │
-// │   1. map.setCenter(payload.generale.center)                         │
-// │   2. map.setZoom(payload.generale.zoom)                             │
-// │   3. Ajouter le marker (pin orange #FF6600)                         │
-// │   4. Dessiner le contour commune sur la Particulière                │
-// │   5. Dessiner la parcelle sur Aérienne + Cadastre                   │
-// │   6. Charger les tuiles IGN cadastre (overlay)                      │
-// │                                                                     │
-// │ PAS de fitBounds, PAS de idle chain, PAS de safety check.           │
-// │ Le zoom et le centre sont calculés par le back pour un viewport     │
-// │ 4:3 fixe → résultat identique sur mobile et desktop.                │
-// │                                                                     │
-// │ Pour la CAPTURE D'IMAGE (export PNG pour le rapport) :              │
-// │   - Attendre l'événement 'tilesloaded' (pas 'idle')                 │
-// │   - 'idle' = carte stabilisée (OK pour navigation)                  │
-// │   - 'tilesloaded' = tuiles rendues (obligatoire pour capture)       │
-// │   - Puis html2canvas ou Google Static Maps API                      │
-// │                                                                     │
-// │ Pour l'INTERACTION CADASTRE (sélection multi-parcelles) :           │
-// │   - Reste 100% front (clic → toggle parcelle)                       │
-// │   - Les parcelles du viewport sont chargées via IGN apicarto        │
-// │     au fur et à mesure que l'utilisateur navigue (zoom >= 18)       │
-// │   - La mise à jour de la vue aérienne (fitBounds sur sélection)     │
-// │     reste côté front, cappée à zoom 19 via idle listener            │
-// └─────────────────────────────────────────────────────────────────────┘
-//
-// ┌─────────────────────────────────────────────────────────────────────┐
-// │ RÈGLES MÉTIER À PORTER EN BACK (résumé)                             │
-// │                                                                     │
-// │ SITUATION GÉNÉRALE (algo 3) :                                       │
-// │   - INSIDE top10 (dist < radiusIn) → contour ville                  │
-// │   - NEARBY top10 (radiusIn < dist < 30km) → bbox bien↔ville +10%   │
-// │   - STANDARD :                                                      │
-// │     - Territoire spécial (Corse/DOM-TOM) → bounds territoire        │
-// │       Corse: zoomPlus +1, Martinique: +1                            │
-// │       Guadeloupe/Guyane/Réunion/Mayotte: +0                         │
-// │     - P1: top10 < 40km → bbox bien↔top10 +10%                      │
-// │     - P2: top10 40-100km → bbox bien↔top10↔ville>90k +10%          │
-// │     - P3: top10 > 100km → bbox bien↔2 villes>150k +10%             │
-// │   - Pin margin: 15% min du bord                                     │
-// │   - TOP10 dans viewport: 5% min du bord (ne pas pousser la pin)    │
-// │                                                                     │
-// │ SITUATION PARTICULIÈRE (algo 2) :                                   │
-// │   - Villes à arrondissements (Paris/Lyon/Marseille) :               │
-// │     → contour arrondissement + zoom+1, cap 16                       │
-// │   - Autres communes :                                               │
-// │     → fitBounds(bien, centre-ville commune)                         │
-// │     → zoom clamp 14-15 (standard), 14-16 (commune < 2km)           │
-// │     → margin 20% pour les 2 points                                  │
-// │                                                                     │
-// │ VUE AÉRIENNE : zoom 19, satellite, tilt 0                           │
-// │ PLAN CADASTRAL : zoom 19, tuiles IGN, parcelle auto-sélectionnée    │
-// └─────────────────────────────────────────────────────────────────────┘
-//
-// ═══════════════════════════════════════════════════════════════════════════
-
 // ===== MAIN =====
 async function go() {
   const address = document.getElementById('addressInput').value.trim();
@@ -1115,7 +960,6 @@ async function go() {
     let bien;
 
     if (currentGeoSource === 'google') {
-      // Mode Google: géocode Google + dept extrait du code postal → pas d'appel BAN
       setStatus('Géocodage Google…', 'loading');
       const googleResult = await geocodeGoogle(address);
       if (googleResult) {
@@ -1124,13 +968,11 @@ async function go() {
         document.getElementById('geoInfo').textContent = 'Dept: ' + (dept || '?') + ' (code postal)';
         console.log('Google geocode: ' + bien.lat.toFixed(6) + ',' + bien.lng.toFixed(6) + ' dept=' + dept);
       } else {
-        // Fallback BAN si Google échoue
         console.warn('Google geocode failed, fallback BAN');
         bien = await geocode(address);
         document.getElementById('geoInfo').textContent = 'Google échoué → fallback BAN';
       }
     } else {
-      // Mode BAN: comme avant
       bien = await geocode(address);
       document.getElementById('geoInfo').textContent = '';
     }
@@ -1231,11 +1073,9 @@ async function go() {
       modeLabel = 'proche de ' + top10.city.nom;
       console.log('Mode NEARBY: ' + top10.city.nom + ' (' + top10.city.dist.toFixed(1) + 'km)');
 
-      // Ensure a TOP5 is in the framing
       const TOP5 = ['Paris', 'Marseille', 'Lyon', 'Toulouse', 'Bordeaux'];
       const refCities = [top10.city];
       if (!TOP5.includes(top10.city.nom)) {
-        // Add nearest TOP5
         const nearestTop5 = TOP10_CITIES.map(c => ({
           ...c, dist: haversine(bien.lat, bien.lng, c.lat, c.lng)
         })).filter(c => TOP5.includes(c.nom) && c.dist > 5)
@@ -1286,10 +1126,8 @@ async function go() {
         console.log(`Algo ${selectedAlgo}: ${algoPhase} → ${gCities.map(c => c.nom + ' (' + c.dist.toFixed(0) + 'km)').join(', ')}`);
 
         if (result.fixedZoom) {
-          // Algo 4: zoom fixe, centré sur le bien, clampé à la France
           mapG.setCenter({ lat: bien.lat, lng: bien.lng });
           mapG.setZoom(result.fixedZoom);
-          // Clamp: max 20% du viewport hors France métropolitaine
           google.maps.event.addListenerOnce(mapG, 'idle', () => {
             clampToFrance(mapG, bien.lat, bien.lng, 0.15);
           });
@@ -1386,7 +1224,6 @@ async function go() {
       }
     }, 3000);
 
-    // SAFETY: ensure pin is visible on Générale et Particulière after everything settles
     setTimeout(() => {
       [mapG, mapP].forEach((map, i) => {
         const label = i === 0 ? 'Générale' : 'Particulière';
@@ -1396,7 +1233,6 @@ async function go() {
           console.log('SAFETY PIN: ' + label + ' — pin hors viewport, recentrage');
           map.panTo({ lat: bien.lat, lng: bien.lng });
         } else {
-          // Pin is in viewport but check it has at least 10% margin
           const ne = bounds.getNorthEast();
           const sw = bounds.getSouthWest();
           const h = ne.lat() - sw.lat();
@@ -1419,7 +1255,6 @@ async function go() {
   btn.disabled = false;
 }
 
-// ===== COMMUNE SIZE CALCULATION =====
 function communeSizeKm(bounds) {
   const ne = bounds.getNorthEast();
   const sw = bounds.getSouthWest();
@@ -1428,7 +1263,6 @@ function communeSizeKm(bounds) {
   return { width, height, max: Math.max(width, height) };
 }
 
-// ===== STANDARD PARTICULIÈRE LOGIC =====
 async function doParticuliereStandard(bien) {
   let communeName = '?';
   mapP.setOptions({ maxZoom: 16 });
@@ -1480,7 +1314,6 @@ async function doParticuliereStandard(bien) {
   return communeName;
 }
 
-// ===== PARTICULIÈRE ALGO 2 — Bien ↔ Centre-ville =====
 async function doParticuliereAlgo2(bien) {
   let communeName = '?';
   try {
@@ -1489,7 +1322,6 @@ async function doParticuliereAlgo2(bien) {
       communeName = communeData.nom;
     }
 
-    // Determine zoom max based on commune size
     const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
     let zoomMax = 15;
     if (contourBounds) {
@@ -1498,7 +1330,6 @@ async function doParticuliereAlgo2(bien) {
       console.log(communeName + ' algo2 bbox: ' + size.max.toFixed(1) + 'km → zoomMax ' + zoomMax);
     }
 
-    // Get centre-ville via Google Geocoder (with postal code for disambiguation)
     const postalCode = (lastAddress || '').match(/\b(\d{5})\b/);
     const searchName = postalCode ? communeName + ' ' + postalCode[1] : communeName;
     const center = await getGoogleCenterLocation(searchName, bien.lat, bien.lng);
@@ -1507,29 +1338,24 @@ async function doParticuliereAlgo2(bien) {
       return await doParticuliereStandard(bien);
     }
 
-    // Check distance bien ↔ centre-ville
     const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
     console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
     if (distBienCentre > 5) {
-      // Google Geocoder returned a wrong centre-ville (homonym?), ignore it
       console.warn(communeName + ': centre-ville Google trop loin (' + distBienCentre.toFixed(0) + 'km) → centrage sur le bien au zoom ' + zoomMax);
       mapP.setCenter({ lat: bien.lat, lng: bien.lng });
       mapP.setZoom(zoomMax);
     } else {
-      // FitBounds on [bien, centre-ville]
       const bounds = new google.maps.LatLngBounds();
       bounds.extend({ lat: bien.lat, lng: bien.lng });
       bounds.extend({ lat: center.lat, lng: center.lng });
       mapP.fitBounds(bounds);
 
-      // After fitBounds settles → clamp zoom 14-zoomMax (idle chain)
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
         let z = mapP.getZoom();
         if (z > zoomMax) mapP.setZoom(zoomMax);
         else if (z < 14) mapP.setZoom(14);
 
-        // After zoom clamp settles → ensure both points have 20% margin
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
           checkAndPanForMargin(mapP, [
             { lat: bien.lat, lng: bien.lng },
@@ -1655,7 +1481,7 @@ function showAlgoDetails(bien, gCities, communeName, top10, modeLabel, cadastreR
     <p>Zoom: <span class="value" id="zoomA">…</span></p>`;
 
   document.getElementById('algoCadastre').innerHTML = `<h4>Cadastre</h4>
-    <p>Tuiles IGN Parcellaire Express</p>
+    <p>Google roadmap + overlay IGN Parcellaire Express</p>
     <p><span class="value">${cadastreRef || '—'}</span></p>
     <p>Zoom: <span class="value" id="zoomC">…</span></p>`;
 
@@ -1695,7 +1521,6 @@ function drawTrackedPolygon(map, feature, color, trackArr) {
     : geom.coordinates[0];
   const path = coords.map(c => ({ lat: c[1], lng: c[0] }));
 
-  // Store for Static Maps export (aérienne only)
   if (map === mapA) _parcelleCoords.push(path);
 
   const poly = new google.maps.Polygon({
@@ -1918,7 +1743,7 @@ function updateAerienneFromSelection() {
   });
 }
 
-// ===== DRAW RECTANGLE ON AÉRIENNE (Google DrawingManager) =====
+// ===== DRAW RECTANGLE ON AÉRIENNE =====
 let drawingManager = null;
 let drawFinalRect = null;
 let drawingActive = false;
@@ -1941,14 +1766,11 @@ function initDrawingManager() {
   drawingManager.setMap(mapA);
 
   google.maps.event.addListener(drawingManager, 'rectanglecomplete', (rect) => {
-    // Remove previous rectangle if any
     if (drawFinalRect) drawFinalRect.setMap(null);
     drawFinalRect = rect;
 
-    // Remove cadastre contour from aérienne — the rectangle replaces it
     clearPolygons(currentPolygonsA);
 
-    // Exit drawing mode
     drawingManager.setDrawingMode(null);
     drawingActive = false;
     document.getElementById('drawRectBtn').style.background = 'white';
@@ -1984,12 +1806,10 @@ function clearRectOverlay() {
 }
 
 function clearAndRestoreCadastre() {
-  // Remove rectangle
   clearRectOverlay();
   document.getElementById('clearRectBtn').style.display = 'none';
   document.getElementById('drawHint').textContent = 'Tracez un rectangle sur la vue aérienne';
 
-  // Restore cadastre contour from selected parcels
   clearPolygons(currentPolygonsA);
   if (selectedParcels.length > 0) {
     selectedParcels.forEach(sp => {
@@ -2013,7 +1833,6 @@ async function captureAllMaps() {
     { id: 'mapCadastre', label: 'Plan Cadastral' },
   ];
 
-  // Wait for tilesloaded on all maps
   await Promise.all([mapG, mapP, mapA, mapC].map(m => new Promise(resolve => {
     google.maps.event.addListenerOnce(m, 'tilesloaded', resolve);
     setTimeout(resolve, 4000);
