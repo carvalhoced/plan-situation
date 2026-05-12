@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v85</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v87</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -1324,8 +1324,8 @@ async function doParticuliereAlgo2(bien) {
     }
 
     const postalCode = (lastAddress || '').match(/\b(\d{5})\b/);
-    const searchName = postalCode ? communeName + ' ' + postalCode[1] : communeName;
-    const center = await getGoogleCenterLocation(searchName, bien.lat, bien.lng);
+    const mairieSearch = postalCode ? 'Mairie ' + communeName + ' ' + postalCode[1] : 'Mairie ' + communeName;
+    const center = await getGoogleCenterLocation(mairieSearch, bien.lat, bien.lng);
     if (!center) {
       console.warn('Algo2: pas de centre-ville Google, fallback centrage bien zoom ' + ZOOM_MAX);
       mapP.setCenter({ lat: bien.lat, lng: bien.lng });
@@ -1336,32 +1336,23 @@ async function doParticuliereAlgo2(bien) {
     const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
     console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
-    // Centrer sur le milieu bien/centre-ville au zoom 15, puis dézommer si nécessaire
-    const midLat = (bien.lat + center.lat) / 2;
-    const midLng = (bien.lng + center.lng) / 2;
-    mapP.setCenter({ lat: midLat, lng: midLng });
+    // Centrer sur le BIEN au zoom 15, puis dézommer si le centre-ville n'est pas visible
+    mapP.setCenter({ lat: bien.lat, lng: bien.lng });
     mapP.setZoom(ZOOM_MAX);
-    console.log(communeName + ': centrage milieu (' + midLat.toFixed(5) + ',' + midLng.toFixed(5) + ') zoom ' + ZOOM_MAX);
+    console.log(communeName + ': centrage sur le bien (' + bien.lat.toFixed(5) + ',' + bien.lng.toFixed(5) + ') zoom ' + ZOOM_MAX);
 
     google.maps.event.addListenerOnce(mapP, 'idle', () => {
-      // Vérifier que les deux points sont visibles avec 20% de marge
       const b = mapP.getBounds();
       if (!b) return;
-      const ne = b.getNorthEast(), sw = b.getSouthWest();
-      const h = ne.lat() - sw.lat(), w = ne.lng() - sw.lng();
-      const margin = 0.20;
-      const bienOk = (bien.lat - sw.lat()) > h * margin && (ne.lat() - bien.lat) > h * margin &&
-                     (bien.lng - sw.lng()) > w * margin && (ne.lng() - bien.lng) > w * margin;
-      const centerOk = (center.lat - sw.lat()) > h * margin && (ne.lat() - center.lat) > h * margin &&
-                       (center.lng - sw.lng()) > w * margin && (ne.lng() - center.lng) > w * margin;
 
-      if (!bienOk || !centerOk) {
-        // Un point est trop proche du bord → dézommer pour tout afficher
-        const bounds = new google.maps.LatLngBounds();
-        bounds.extend({ lat: bien.lat, lng: bien.lng });
-        bounds.extend({ lat: center.lat, lng: center.lng });
-        mapP.fitBounds(bounds);
-        console.log(communeName + ': dézoom nécessaire pour afficher les 2 points');
+      // Le centre-ville est-il visible dans le viewport ?
+      if (!b.contains({ lat: center.lat, lng: center.lng })) {
+        // Centre-ville hors viewport → dézommer pour montrer les deux
+        console.log(communeName + ': centre-ville hors viewport → dézoom');
+        const fitB = new google.maps.LatLngBounds();
+        fitB.extend({ lat: bien.lat, lng: bien.lng });
+        fitB.extend({ lat: center.lat, lng: center.lng });
+        mapP.fitBounds(fitB);
 
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
           if (mapP.getZoom() > ZOOM_MAX) mapP.setZoom(ZOOM_MAX);
@@ -1371,7 +1362,7 @@ async function doParticuliereAlgo2(bien) {
           ], 0.20);
         });
       } else {
-        console.log(communeName + ': les 2 points sont visibles au zoom ' + ZOOM_MAX);
+        console.log(communeName + ': centre-ville visible au zoom ' + ZOOM_MAX + ' → OK');
       }
     });
 
