@@ -1315,6 +1315,7 @@ async function doParticuliereStandard(bien) {
 }
 
 async function doParticuliereAlgo2(bien) {
+  const ZOOM_MAX = 15;
   let communeName = '?';
   try {
     const communeData = await fetchCommuneContour(bien.lat, bien.lng);
@@ -1322,49 +1323,37 @@ async function doParticuliereAlgo2(bien) {
       communeName = communeData.nom;
     }
 
-    const contourBounds = (communeData && communeData.contour) ? geojsonToBounds(communeData.contour) : null;
-    let zoomMax = 15;
-    if (contourBounds) {
-      const size = communeSizeKm(contourBounds);
-      if (size.max < 2) zoomMax = 16;
-      console.log(communeName + ' algo2 bbox: ' + size.max.toFixed(1) + 'km → zoomMax ' + zoomMax);
-    }
-
     const postalCode = (lastAddress || '').match(/\b(\d{5})\b/);
     const searchName = postalCode ? communeName + ' ' + postalCode[1] : communeName;
     const center = await getGoogleCenterLocation(searchName, bien.lat, bien.lng);
     if (!center) {
-      console.warn('Algo2: pas de centre-ville Google, fallback algo1');
-      return await doParticuliereStandard(bien);
+      console.warn('Algo2: pas de centre-ville Google, fallback centrage bien zoom ' + ZOOM_MAX);
+      mapP.setCenter({ lat: bien.lat, lng: bien.lng });
+      mapP.setZoom(ZOOM_MAX);
+      return communeName;
     }
 
     const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
     console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
-    if (distBienCentre > 5) {
-      console.warn(communeName + ': centre-ville Google trop loin (' + distBienCentre.toFixed(0) + 'km) → centrage sur le bien au zoom ' + zoomMax);
-      mapP.setCenter({ lat: bien.lat, lng: bien.lng });
-      mapP.setZoom(zoomMax);
-    } else {
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend({ lat: bien.lat, lng: bien.lng });
-      bounds.extend({ lat: center.lat, lng: center.lng });
-      mapP.fitBounds(bounds);
+    // Toujours fitBounds sur bien + centre-ville, puis cap à zoom 15
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: bien.lat, lng: bien.lng });
+    bounds.extend({ lat: center.lat, lng: center.lng });
+    mapP.fitBounds(bounds);
+
+    google.maps.event.addListenerOnce(mapP, 'idle', () => {
+      let z = mapP.getZoom();
+      if (z > ZOOM_MAX) mapP.setZoom(ZOOM_MAX);
 
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
-        let z = mapP.getZoom();
-        if (z > zoomMax) mapP.setZoom(zoomMax);
-        else if (z < 14) mapP.setZoom(14);
-
-        google.maps.event.addListenerOnce(mapP, 'idle', () => {
-          checkAndPanForMargin(mapP, [
-            { lat: bien.lat, lng: bien.lng },
-            { lat: center.lat, lng: center.lng }
-          ], 0.20);
-          console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + zoomMax + ')');
-        });
+        checkAndPanForMargin(mapP, [
+          { lat: bien.lat, lng: bien.lng },
+          { lat: center.lat, lng: center.lng }
+        ], 0.20);
+        console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + ZOOM_MAX + ')');
       });
-    }
+    });
 
   } catch(e) {
     console.warn('Particuliere algo2 failed:', e);
