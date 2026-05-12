@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v84</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v85</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -1336,30 +1336,43 @@ async function doParticuliereAlgo2(bien) {
     const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
     console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
-    // fitBounds sur bien + centre-ville, puis ajustement
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend({ lat: bien.lat, lng: bien.lng });
-    bounds.extend({ lat: center.lat, lng: center.lng });
-    mapP.fitBounds(bounds);
+    // Centrer sur le milieu bien/centre-ville au zoom 15, puis dézommer si nécessaire
+    const midLat = (bien.lat + center.lat) / 2;
+    const midLng = (bien.lng + center.lng) / 2;
+    mapP.setCenter({ lat: midLat, lng: midLng });
+    mapP.setZoom(ZOOM_MAX);
+    console.log(communeName + ': centrage milieu (' + midLat.toFixed(5) + ',' + midLng.toFixed(5) + ') zoom ' + ZOOM_MAX);
 
     google.maps.event.addListenerOnce(mapP, 'idle', () => {
-      let z = mapP.getZoom();
-      if (z > ZOOM_MAX) {
-        // fitBounds a zoomé au-delà de 15 → recentrer sur le milieu et capper
-        const midLat = (bien.lat + center.lat) / 2;
-        const midLng = (bien.lng + center.lng) / 2;
-        mapP.setCenter({ lat: midLat, lng: midLng });
-        mapP.setZoom(ZOOM_MAX);
-        console.log(communeName + ': zoom ' + z + ' > ' + ZOOM_MAX + ' → recentrage milieu');
-      }
+      // Vérifier que les deux points sont visibles avec 20% de marge
+      const b = mapP.getBounds();
+      if (!b) return;
+      const ne = b.getNorthEast(), sw = b.getSouthWest();
+      const h = ne.lat() - sw.lat(), w = ne.lng() - sw.lng();
+      const margin = 0.20;
+      const bienOk = (bien.lat - sw.lat()) > h * margin && (ne.lat() - bien.lat) > h * margin &&
+                     (bien.lng - sw.lng()) > w * margin && (ne.lng() - bien.lng) > w * margin;
+      const centerOk = (center.lat - sw.lat()) > h * margin && (ne.lat() - center.lat) > h * margin &&
+                       (center.lng - sw.lng()) > w * margin && (ne.lng() - center.lng) > w * margin;
 
-      google.maps.event.addListenerOnce(mapP, 'idle', () => {
-        checkAndPanForMargin(mapP, [
-          { lat: bien.lat, lng: bien.lng },
-          { lat: center.lat, lng: center.lng }
-        ], 0.20);
-        console.log(communeName + ': algo2 bien↔centre-ville zoom=' + mapP.getZoom() + ' (max ' + ZOOM_MAX + ')');
-      });
+      if (!bienOk || !centerOk) {
+        // Un point est trop proche du bord → dézommer pour tout afficher
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend({ lat: bien.lat, lng: bien.lng });
+        bounds.extend({ lat: center.lat, lng: center.lng });
+        mapP.fitBounds(bounds);
+        console.log(communeName + ': dézoom nécessaire pour afficher les 2 points');
+
+        google.maps.event.addListenerOnce(mapP, 'idle', () => {
+          if (mapP.getZoom() > ZOOM_MAX) mapP.setZoom(ZOOM_MAX);
+          checkAndPanForMargin(mapP, [
+            { lat: bien.lat, lng: bien.lng },
+            { lat: center.lat, lng: center.lng }
+          ], 0.20);
+        });
+      } else {
+        console.log(communeName + ': les 2 points sont visibles au zoom ' + ZOOM_MAX);
+      }
     });
 
   } catch(e) {
