@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v88</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v89</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -1421,19 +1421,29 @@ function getGoogleViewport(placeName) {
 
 function getGoogleCenterLocation(placeName, bienLat, bienLng) {
   return new Promise((resolve) => {
-    const geocoder = new google.maps.Geocoder();
-    const biasRadius = 0.5;
-    const searchBounds = new google.maps.LatLngBounds(
-      { lat: bienLat - biasRadius, lng: bienLng - biasRadius },
-      { lat: bienLat + biasRadius, lng: bienLng + biasRadius }
-    );
-    geocoder.geocode({ address: placeName, bounds: searchBounds }, function(results, status) {
-      if (status === 'OK' && results && results[0] && results[0].geometry && results[0].geometry.location) {
-        const loc = results[0].geometry.location;
-        console.log(placeName + ' centre-ville Google:', loc.lat().toFixed(5), loc.lng().toFixed(5));
+    // Utiliser Places API (textSearch) pour trouver le LIEU (bâtiment mairie),
+    // pas le Geocoder qui géocode du texte d'adresse et renvoie des centroïdes.
+    const service = new google.maps.places.PlacesService(mapP);
+    const location = new google.maps.LatLng(bienLat, bienLng);
+    service.textSearch({
+      query: placeName,
+      location: location,
+      radius: 15000,
+      type: 'city_hall'
+    }, function(results, status) {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
+        // Prendre le résultat le plus proche du bien
+        let best = results[0];
+        let bestDist = haversine(bienLat, bienLng, best.geometry.location.lat(), best.geometry.location.lng());
+        for (let i = 1; i < results.length; i++) {
+          const d = haversine(bienLat, bienLng, results[i].geometry.location.lat(), results[i].geometry.location.lng());
+          if (d < bestDist) { best = results[i]; bestDist = d; }
+        }
+        const loc = best.geometry.location;
+        console.log(placeName + ' Places API → ' + best.name + ': ' + loc.lat().toFixed(5) + ',' + loc.lng().toFixed(5) + ' (dist=' + bestDist.toFixed(2) + 'km)');
         resolve({ lat: loc.lat(), lng: loc.lng() });
       } else {
-        console.warn('Google Geocoder: no location for', placeName, 'status:', status);
+        console.warn('Places textSearch: no result for', placeName, 'status:', status);
         resolve(null);
       }
     });
@@ -1904,7 +1914,7 @@ function onGoogleMapsReady() {
 }
 </script>
 
-<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g&libraries=drawing&callback=onGoogleMapsReady"></script>
+<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBR5c9VScpAi7sWhKYX-E5SK5Tk99TJI-g&libraries=drawing,places&callback=onGoogleMapsReady"></script>
 
 </body>
 </html>
