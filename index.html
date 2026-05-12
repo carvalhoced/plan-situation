@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v87</span></h1>
+<h1>Plans de situation — Auto-cadrage <span style="font-size:14px;color:var(--text-light);font-weight:400">v88</span></h1>
 <p class="subtitle">Google Maps · Métropoles + contour commune + vue satellite</p>
 
 <div class="quick-tests" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
@@ -1325,49 +1325,55 @@ async function doParticuliereAlgo2(bien) {
 
     const postalCode = (lastAddress || '').match(/\b(\d{5})\b/);
     const mairieSearch = postalCode ? 'Mairie ' + communeName + ' ' + postalCode[1] : 'Mairie ' + communeName;
+    console.log('[ALGO2] Recherche centre-ville:', mairieSearch);
     const center = await getGoogleCenterLocation(mairieSearch, bien.lat, bien.lng);
     if (!center) {
-      console.warn('Algo2: pas de centre-ville Google, fallback centrage bien zoom ' + ZOOM_MAX);
+      console.warn('[ALGO2] Pas de centre-ville Google → fallback centrage bien zoom ' + ZOOM_MAX);
       mapP.setCenter({ lat: bien.lat, lng: bien.lng });
       mapP.setZoom(ZOOM_MAX);
       return communeName;
     }
 
     const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
-    console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
+    console.log('[ALGO2] ' + communeName + ': mairie Google → ' + center.lat.toFixed(5) + ',' + center.lng.toFixed(5));
+    console.log('[ALGO2] ' + communeName + ': distance bien↔mairie = ' + distBienCentre.toFixed(2) + 'km');
 
-    // Centrer sur le BIEN au zoom 15, puis dézommer si le centre-ville n'est pas visible
+    // Centrer sur le BIEN au zoom 15, puis dézommer si la mairie n'est pas visible
     mapP.setCenter({ lat: bien.lat, lng: bien.lng });
     mapP.setZoom(ZOOM_MAX);
-    console.log(communeName + ': centrage sur le bien (' + bien.lat.toFixed(5) + ',' + bien.lng.toFixed(5) + ') zoom ' + ZOOM_MAX);
+    console.log('[ALGO2] setCenter(' + bien.lat.toFixed(5) + ',' + bien.lng.toFixed(5) + ') + setZoom(' + ZOOM_MAX + ')');
 
     google.maps.event.addListenerOnce(mapP, 'idle', () => {
       const b = mapP.getBounds();
-      if (!b) return;
+      if (!b) { console.warn('[ALGO2] idle: pas de bounds !'); return; }
+      const ne = b.getNorthEast(), sw = b.getSouthWest();
+      console.log('[ALGO2] idle: viewport = SW(' + sw.lat().toFixed(5) + ',' + sw.lng().toFixed(5) + ') NE(' + ne.lat().toFixed(5) + ',' + ne.lng().toFixed(5) + ') zoom=' + mapP.getZoom());
+      const mapCenter = mapP.getCenter();
+      console.log('[ALGO2] idle: center réel = ' + mapCenter.lat().toFixed(5) + ',' + mapCenter.lng().toFixed(5));
 
-      // Le centre-ville est-il visible dans le viewport ?
       if (!b.contains({ lat: center.lat, lng: center.lng })) {
-        // Centre-ville hors viewport → dézommer pour montrer les deux
-        console.log(communeName + ': centre-ville hors viewport → dézoom');
+        console.log('[ALGO2] ❌ Mairie HORS viewport → fitBounds(bien + mairie)');
         const fitB = new google.maps.LatLngBounds();
         fitB.extend({ lat: bien.lat, lng: bien.lng });
         fitB.extend({ lat: center.lat, lng: center.lng });
         mapP.fitBounds(fitB);
 
         google.maps.event.addListenerOnce(mapP, 'idle', () => {
+          console.log('[ALGO2] post-fitBounds: zoom=' + mapP.getZoom() + ' center=' + mapP.getCenter().lat().toFixed(5) + ',' + mapP.getCenter().lng().toFixed(5));
           if (mapP.getZoom() > ZOOM_MAX) mapP.setZoom(ZOOM_MAX);
           checkAndPanForMargin(mapP, [
             { lat: bien.lat, lng: bien.lng },
             { lat: center.lat, lng: center.lng }
           ], 0.20);
+          console.log('[ALGO2] FINAL: zoom=' + mapP.getZoom() + ' center=' + mapP.getCenter().lat().toFixed(5) + ',' + mapP.getCenter().lng().toFixed(5));
         });
       } else {
-        console.log(communeName + ': centre-ville visible au zoom ' + ZOOM_MAX + ' → OK');
+        console.log('[ALGO2] ✅ Mairie visible au zoom ' + ZOOM_MAX + ' → OK, pas de dézoom');
       }
     });
 
   } catch(e) {
-    console.warn('Particuliere algo2 failed:', e);
+    console.warn('[ALGO2] ERREUR:', e);
     mapP.fitBounds(boundsFromRadius(bien.lat, bien.lng, 1.5));
   }
   return communeName;
