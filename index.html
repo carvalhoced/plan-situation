@@ -1336,7 +1336,7 @@ async function doParticuliereAlgo2(bien) {
     const distBienCentre = haversine(bien.lat, bien.lng, center.lat, center.lng);
     console.log(communeName + ': distance bien↔centre-ville = ' + distBienCentre.toFixed(2) + 'km');
 
-    // Toujours fitBounds sur bien + centre-ville, puis cap à zoom 15
+    // fitBounds sur bien + centre-ville, puis ajustement
     const bounds = new google.maps.LatLngBounds();
     bounds.extend({ lat: bien.lat, lng: bien.lng });
     bounds.extend({ lat: center.lat, lng: center.lng });
@@ -1344,7 +1344,14 @@ async function doParticuliereAlgo2(bien) {
 
     google.maps.event.addListenerOnce(mapP, 'idle', () => {
       let z = mapP.getZoom();
-      if (z > ZOOM_MAX) mapP.setZoom(ZOOM_MAX);
+      if (z > ZOOM_MAX) {
+        // fitBounds a zoomé au-delà de 15 → recentrer sur le milieu et capper
+        const midLat = (bien.lat + center.lat) / 2;
+        const midLng = (bien.lng + center.lng) / 2;
+        mapP.setCenter({ lat: midLat, lng: midLng });
+        mapP.setZoom(ZOOM_MAX);
+        console.log(communeName + ': zoom ' + z + ' > ' + ZOOM_MAX + ' → recentrage milieu');
+      }
 
       google.maps.event.addListenerOnce(mapP, 'idle', () => {
         checkAndPanForMargin(mapP, [
